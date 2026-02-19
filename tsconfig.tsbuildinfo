@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/historicallayer.tsx","./src/markerlink.tsx","./src/personallayer.tsx","./src/db.ts","./src/imagepreview.ts","./src/main.tsx","./src/timelineutils.ts","./src/vite-env.d.ts","./src/history/ingesthistory.ts","./src/history/types.ts"],"version":"5.9.3"}

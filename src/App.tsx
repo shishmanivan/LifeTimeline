@@ -1,26 +1,37 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import eventsData from "./data/events.json";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   deletePhoto,
   getAllPhotos,
+  getHistoricalEventsInRange,
   savePhoto,
   updatePhotoOffsets,
   updatePhotoPreview,
 } from "./db";
+import type { HistoricalEvent } from "./history/types";
+import { runHistoryIngest } from "./history/ingestHistory";
 import { generatePreviewBlob } from "./imagePreview";
+import { dateToX, computeLinePath } from "./timelineUtils";
+import { MarkerLink } from "./MarkerLink";
+import {
+  PersonalLayer,
+  type PersonalPhoto,
+  type PositionedPhoto,
+  type Offsets,
+} from "./PersonalLayer";
+import {
+  HistoricalLayer,
+  assignHistoricalLanes,
+  AXIS_GAP,
+  HIST_ARTICLE_OFFSET,
+  HIST_LANE_HEIGHT,
+  HIST_ZONE_HEIGHT,
+  MAX_LANES,
+  type PositionedHistorical,
+} from "./HistoricalLayer";
+
+export type { Offsets };
 
 type Scale = "30d" | "90d" | "1y" | "2y" | "5y" | "10y";
-type EventType = "personal" | "historical";
-
-type TimelineEvent = {
-  id: string;
-  title: string;
-  date: string;
-  type: EventType;
-  imageUrl?: string;
-  offsetY?: number;
-  offsetXDays?: number;
-};
 
 const scales: Scale[] = ["30d", "90d", "1y", "2y", "5y", "10y"];
 
@@ -30,15 +41,29 @@ const scaleMeta: Record<Scale, { label: string; rangeDays: number }> = {
   "1y": { label: "1 year", rangeDays: 365 },
   "2y": { label: "2 years", rangeDays: 730 },
   "5y": { label: "5 years", rangeDays: 1825 },
-  "10y": { label: "10 years", rangeDays: 3650 }
+  "10y": { label: "10 years", rangeDays: 3650 },
 };
 
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 const CARD_WIDTH_PERCENT = 18;
 const LANE_HEIGHT = 140;
 const EPS = 0.01;
+const SCROLL_STOP_DEBOUNCE_MS = 200;
 
-type Offsets = { offsetXDays: number; offsetY: number };
+function hashId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+type AnchorPosition = "left" | "center" | "right";
+
+function getAnchorPosition(id: string): AnchorPosition {
+  const idx = hashId(id) % 3;
+  return idx === 0 ? "left" : idx === 1 ? "center" : "right";
+}
 
 const MAX_OFFSET_DAYS: Record<Scale, number> = {
   "30d": 3,
@@ -57,6 +82,12 @@ function formatAxisDate(d: Date, scale: Scale): string {
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const year = d.getFullYear();
   return `${day}.${month}.${year}`;
+}
+
+function getMinImportanceForScale(scale: Scale): number {
+  if (scale === "30d" || scale === "90d") return 3;
+  if (scale === "1y") return 3;
+  return 2;
 }
 
 function clampCenterToToday(center: Date, scale: Scale): Date {
@@ -136,7 +167,16 @@ function AddPhotoModal({ onClose, onSubmit }: AddPhotoModalProps) {
 
 function App() {
   const [scaleIndex, setScaleIndex] = useState(2);
-  const [personalPhotos, setPersonalPhotos] = useState<TimelineEvent[]>([]);
+  const [personalPhotos, setPersonalPhotos] = useState<PersonalPhoto[]>([]);
+  const [historicalEvents, setHistoricalEvents] = useState<HistoricalEvent[]>([]);
+  const [historicalImageUrls, setHistoricalImageUrls] = useState<
+    Record<string, string>
+  >({});
+  const [layoutInfo, setLayoutInfo] = useState<{
+    width: number;
+    height: number;
+    axisY: number;
+  } | null>(null);
   const objectUrlsRef = useRef<Map<string, string>>(new Map());
   const imageBlobsRef = useRef<Map<string, Blob>>(new Map());
   const overlayUrlRef = useRef<string | null>(null);
@@ -159,48 +199,66 @@ function App() {
     startOffsetXDays: number;
     startOffsetY: number;
   } | null>(null);
-  const cardDragLastRef = useRef<{ offsetXDays: number; offsetY: number } | null>(
-    null
-  );
+  const cardDragLastRef = useRef<{
+    offsetXDays: number;
+    offsetY: number;
+  } | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const axisRef = useRef<HTMLDivElement>(null);
+  const personalCardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const historicalCardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [visiblePhotoIds, setVisiblePhotoIds] = useState<Set<string>>(new Set());
+  const [visibleHistIds, setVisibleHistIds] = useState<Set<string>>(new Set());
+  const [animatedLines, setAnimatedLines] = useState<Set<string>>(new Set());
+  const [linesData, setLinesData] = useState<
+    { id: string; path: string; totalLength: number }[]
+  >([]);
+  const seenInViewportRef = useRef<Set<string>>(new Set());
+  const visiblePhotoIdsRef = useRef<Set<string>>(new Set());
+  const visibleHistIdsRef = useRef<Set<string>>(new Set());
+  const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleScrollStopRef = useRef<() => void>(() => {});
   const scale = scales[scaleIndex];
-  const staticEvents = eventsData as TimelineEvent[];
-  const events = useMemo(
-    () => [...staticEvents, ...personalPhotos],
-    [staticEvents, personalPhotos]
-  );
 
   const getActiveOffsets = (id: string): Offsets => {
     const pend = pendingOffsets[id];
     if (pend) return pend;
     const p = personalPhotos.find((x) => x.id === id);
-    return {
-      offsetXDays: p?.offsetXDays ?? 0,
-      offsetY: p?.offsetY ?? 0,
-    };
+    if (p) return { offsetXDays: p.offsetXDays, offsetY: p.offsetY };
+    return { offsetXDays: 0, offsetY: 0 };
   };
+
+  const isDirty = (id: string): boolean => {
+    const pend = pendingOffsets[id];
+    if (!pend) return false;
+    const p = personalPhotos.find((x) => x.id === id);
+    if (!p) return true;
+    return (
+      Math.abs(pend.offsetXDays - p.offsetXDays) > EPS ||
+      Math.abs(pend.offsetY - p.offsetY) > 1
+    );
+  };
+
   useEffect(() => {
     let cancelled = false;
     getAllPhotos().then(async (records) => {
       if (cancelled) return;
       const today = todayStr();
-      const events: TimelineEvent[] = records.map((r) => {
+      const photos: PersonalPhoto[] = records.map((r) => {
         const date = r.date > today ? today : r.date;
-        const displayBlob = r.previewBlob ?? r.imageBlob;
-        const imageUrl = URL.createObjectURL(displayBlob);
-        objectUrlsRef.current.set(r.id, imageUrl);
+        const image = URL.createObjectURL(r.previewBlob ?? r.imageBlob);
+        objectUrlsRef.current.set(r.id, image);
         imageBlobsRef.current.set(r.id, r.imageBlob);
         return {
           id: r.id,
           title: r.title,
           date,
-          type: "personal",
-          imageUrl,
-          offsetY: r.offsetY ?? 0,
+          image,
           offsetXDays: r.offsetXDays ?? 0,
+          offsetY: r.offsetY ?? 0,
         };
       });
-      setPersonalPhotos(events);
+      setPersonalPhotos(photos);
 
       for (const r of records) {
         if (cancelled) break;
@@ -212,12 +270,10 @@ function App() {
           if (cancelled) return;
           const oldUrl = objectUrlsRef.current.get(r.id);
           if (oldUrl) URL.revokeObjectURL(oldUrl);
-          const newUrl = URL.createObjectURL(previewBlob);
-          objectUrlsRef.current.set(r.id, newUrl);
+          const newImage = URL.createObjectURL(previewBlob);
+          objectUrlsRef.current.set(r.id, newImage);
           setPersonalPhotos((prev) =>
-            prev.map((p) =>
-              p.id === r.id ? { ...p, imageUrl: newUrl } : p
-            )
+            prev.map((p) => (p.id === r.id ? { ...p, image: newImage } : p))
           );
         } catch {
           /* keep original */
@@ -228,6 +284,22 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const urls: Record<string, string> = {};
+    historicalEvents.forEach((e) => {
+      if (e.previewBlob) {
+        urls[e.id] = URL.createObjectURL(e.previewBlob);
+      }
+    });
+    setHistoricalImageUrls((prev) => {
+      Object.values(prev).forEach((u) => URL.revokeObjectURL(u));
+      return urls;
+    });
+    return () => {
+      Object.values(urls).forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [historicalEvents]);
 
   useEffect(() => {
     setCenterDate((prev) => clampCenterToToday(prev, scale));
@@ -271,13 +343,61 @@ function App() {
     return () => document.removeEventListener("wheel", onWheel);
   }, []);
 
+  useEffect(() => {
+    visiblePhotoIdsRef.current = visiblePhotoIds;
+    visibleHistIdsRef.current = visibleHistIds;
+  }, [visiblePhotoIds, visibleHistIds]);
+
+  useEffect(() => {
+    const fireScrollStop = () => {
+      const photoIds = visiblePhotoIdsRef.current;
+      const histIds = visibleHistIdsRef.current;
+      const candidates = new Set<string>();
+      [...photoIds, ...histIds].forEach((id) => {
+        if (!seenInViewportRef.current.has(id)) candidates.add(id);
+      });
+      candidates.forEach((id) => seenInViewportRef.current.add(id));
+      if (candidates.size > 0) {
+        setAnimatedLines((prev) => {
+          const next = new Set(prev);
+          candidates.forEach((id) => next.add(id));
+          return next;
+        });
+      }
+    };
+    const schedule = () => {
+      if (scrollStopTimerRef.current) clearTimeout(scrollStopTimerRef.current);
+      scrollStopTimerRef.current = setTimeout(() => {
+        scrollStopTimerRef.current = null;
+        fireScrollStop();
+      }, SCROLL_STOP_DEBOUNCE_MS);
+    };
+    scheduleScrollStopRef.current = schedule;
+    const el = timelineRef.current;
+    if (!el) return;
+    schedule();
+    el.addEventListener("wheel", schedule);
+    const onMove = () => schedule();
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onMove);
+    return () => {
+      el.removeEventListener("wheel", schedule);
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onMove);
+      if (scrollStopTimerRef.current) clearTimeout(scrollStopTimerRef.current);
+    };
+  }, []);
+
   const [altHeld, setAltHeld] = useState(false);
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.altKey) setAltHeld(true);
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (!e.altKey) setAltHeld(false);
+      if (!e.altKey) {
+        setAltHeld(false);
+        setCardDragging(null);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
@@ -327,76 +447,299 @@ function App() {
     return ticks;
   }, [axisDates]);
 
-  const positionedEvents = useMemo(() => {
-    const halfRange = scaleMeta[scale].rangeDays / 2;
+  useEffect(() => {
+    runHistoryIngest();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const { start, end } = axisDates;
+    const startISO = start.toISOString().slice(0, 10);
+    const endISO = end.toISOString().slice(0, 10);
+    (async () => {
+      const events = await getHistoricalEventsInRange(startISO, endISO);
+      if (!cancelled) setHistoricalEvents(events);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [axisDates]);
+
+  const positionedPersonal = useMemo((): PositionedPhoto[] => {
+    if (!layoutInfo) return [];
+    const { width } = layoutInfo;
     const rangeDays = scaleMeta[scale].rangeDays;
-    const centerMs = effectiveCenter.getTime();
+    const pxPerDay = width / rangeDays;
+    const axisStart = axisDates.start;
     const maxOffset = MAX_OFFSET_DAYS[scale];
 
-    const withPosition = events
-      .map((event) => {
-        const eventMs = new Date(event.date).getTime();
-        const diffDays = (eventMs - centerMs) / MS_IN_DAY;
-        const ratio = diffDays / halfRange;
-        let xPercent = 50 + ratio * 50;
-
-        const active = getActiveOffsets(event.id);
+    const withPosition = personalPhotos
+      .map((photo) => {
+        const active = getActiveOffsets(photo.id);
         const offsetXDays = Math.max(
           -maxOffset,
           Math.min(maxOffset, active.offsetXDays)
         );
-        const offsetXPercent = (offsetXDays / rangeDays) * 100;
-        xPercent += offsetXPercent;
-
+        let xPx = dateToX(photo.date, axisStart, pxPerDay);
+        xPx += offsetXDays * pxPerDay;
         return {
-          ...event,
-          xPercent,
-          diffDays,
+          ...photo,
+          xPx,
           offsetXDays,
           offsetY: active.offsetY,
         };
       })
-      .filter((event) => event.xPercent >= 0 && event.xPercent <= 100)
-      .sort((a, b) => a.diffDays - b.diffDays);
+      .filter((p) => p.xPx >= -50 && p.xPx <= width + 50)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    const personal = withPosition.filter((e) => e.type === "personal");
-    const historical = withPosition.filter((e) => e.type !== "personal");
+    const hasManualOffset = (p: (typeof withPosition)[0]) =>
+      Math.abs(p.offsetY) > EPS || Math.abs(p.offsetXDays) > EPS;
+    const autoLayout = withPosition.filter((p) => !hasManualOffset(p));
+    const manualLayout = withPosition.filter(hasManualOffset);
 
-    const hasManualOffset = (ev: (typeof withPosition)[0]) =>
-      ev.type === "personal" &&
-      (Math.abs(ev.offsetY ?? 0) > EPS || Math.abs(ev.offsetXDays ?? 0) > EPS);
-
-    const autoLayout = personal.filter((e) => !hasManualOffset(e));
-    const manualLayout = personal.filter(hasManualOffset);
-
-    const lanes: number[][] = [];
-    const assignLane = (ev: (typeof withPosition)[0]): number => {
-      for (let laneIdx = 0; ; laneIdx++) {
-        const lane = lanes[laneIdx] ?? [];
-        const overlaps = lane.some(
-          (x) => Math.abs(x - ev.xPercent) < CARD_WIDTH_PERCENT
-        );
+    const lanes: number[] = [];
+    const assignLane = (p: (typeof withPosition)[0]): number => {
+      const cardWidthPx = (CARD_WIDTH_PERCENT / 100) * width;
+      for (let i = 0; ; i++) {
+        const lastX = lanes[i];
+        const overlaps =
+          lastX !== undefined && Math.abs(p.xPx - lastX) < cardWidthPx;
         if (!overlaps) {
-          if (!lanes[laneIdx]) lanes[laneIdx] = [];
-          lanes[laneIdx].push(ev.xPercent);
-          return laneIdx;
+          lanes[i] = p.xPx;
+          return i;
         }
       }
     };
 
-    const personalWithLanes = [
-      ...autoLayout.map((ev) => ({ ...ev, laneIndex: assignLane(ev) })),
-      ...manualLayout.map((ev) => ({ ...ev, laneIndex: 0, isManual: true })),
-    ];
-    const historicalWithLanes = historical.map((ev) => ({
-      ...ev,
-      laneIndex: 0,
-    }));
+    return [
+      ...autoLayout.map((p) => ({ ...p, laneIndex: assignLane(p) })),
+      ...manualLayout.map((p) => ({ ...p, laneIndex: 0, isManual: true })),
+    ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [
+    personalPhotos,
+    layoutInfo,
+    scale,
+    axisDates,
+    pendingOffsets,
+  ]);
 
-    return [...personalWithLanes, ...historicalWithLanes].sort(
-      (a, b) => a.diffDays - b.diffDays
+  const historicalWithLanes = useMemo(
+    () => assignHistoricalLanes(historicalEvents),
+    [historicalEvents]
+  );
+
+  const positionedHistorical = useMemo((): PositionedHistorical[] => {
+    if (!layoutInfo) return [];
+    const { width, axisY } = layoutInfo;
+    const rangeDays = scaleMeta[scale].rangeDays;
+    const pxPerDay = width / rangeDays;
+    const axisStart = axisDates.start;
+    const minImportance = getMinImportanceForScale(scale);
+
+    const filtered = historicalWithLanes.filter(
+      (e) => (e.importance ?? 3) >= minImportance
     );
-  }, [events, scale, effectiveCenter, pendingOffsets, personalPhotos]);
+
+    return filtered
+      .map((e) => {
+        const xPx = dateToX(e.date, axisStart, pxPerDay);
+        const imageUrl =
+          historicalImageUrls[e.id] ?? e.thumbnailUrl ?? undefined;
+        const laneIdx = Math.min(e.laneIndex, MAX_LANES - 1);
+        const yTop =
+          axisY +
+          AXIS_GAP +
+          laneIdx * HIST_LANE_HEIGHT;
+        const topRelativeToZone = yTop - HIST_ARTICLE_OFFSET - axisY;
+        return {
+          ...e,
+          xPx,
+          imageUrl,
+          yTop,
+          topRelativeToZone,
+        };
+      })
+      .filter((e) => e.xPx >= -50 && e.xPx <= width + 50);
+  }, [
+    historicalWithLanes,
+    historicalImageUrls,
+    layoutInfo,
+    scale,
+    axisDates,
+  ]);
+
+  const measureLayout = useCallback(() => {
+    const timeline = timelineRef.current;
+    const axis = axisRef.current;
+    if (!timeline || !axis) return;
+
+    const tlRect = timeline.getBoundingClientRect();
+    const axisRect = axis.getBoundingClientRect();
+    const axisY = axisRect.top - tlRect.top + axisRect.height / 2;
+
+    setLayoutInfo((prev) => {
+      if (
+        prev &&
+        prev.width === tlRect.width &&
+        prev.height === tlRect.height &&
+        prev.axisY === axisY
+      )
+        return prev;
+      return { width: tlRect.width, height: tlRect.height, axisY };
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    measureLayout();
+  }, [measureLayout, scale, centerDate]);
+
+  useEffect(() => {
+    window.addEventListener("resize", measureLayout);
+    return () => window.removeEventListener("resize", measureLayout);
+  }, [measureLayout]);
+
+  useLayoutEffect(() => {
+    const personalIds = new Set(positionedPersonal.map((p) => p.id));
+    const histIds = new Set(positionedHistorical.map((e) => e.id));
+    const root = timelineRef.current;
+    if (!root) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setVisiblePhotoIds((prev) => {
+          const next = new Set(prev);
+          for (const e of entries) {
+            const el = e.target as HTMLElement;
+            const id =
+              el.getAttribute("data-event-id") ??
+              el.closest("[data-event-id]")?.getAttribute("data-event-id");
+            if (!id) continue;
+            if (personalIds.has(id)) {
+              if (e.isIntersecting) next.add(id);
+              else next.delete(id);
+            }
+          }
+          return next;
+        });
+        setVisibleHistIds((prev) => {
+          const next = new Set(prev);
+          for (const e of entries) {
+            const el = e.target as HTMLElement;
+            const id =
+              el.getAttribute("data-event-id") ??
+              el.closest("[data-event-id]")?.getAttribute("data-event-id");
+            if (!id) continue;
+            if (histIds.has(id)) {
+              if (e.isIntersecting) next.add(id);
+              else next.delete(id);
+            }
+          }
+          return next;
+        });
+      },
+      { root, rootMargin: "0px", threshold: 0.1 }
+    );
+
+    positionedPersonal.forEach((p) => {
+      const el = personalCardRefs.current.get(p.id);
+      if (el) observer.observe(el);
+    });
+    positionedHistorical.forEach((e) => {
+      const el = historicalCardRefs.current.get(e.id);
+      if (el) observer.observe(el);
+    });
+    return () => observer.disconnect();
+  }, [positionedPersonal, positionedHistorical]);
+
+  useLayoutEffect(() => {
+    const timeline = timelineRef.current;
+    const axis = axisRef.current;
+    if (!timeline || !layoutInfo) return;
+
+    const { width, axisY } = layoutInfo;
+    const tlRect = timeline.getBoundingClientRect();
+    const axisRect = axis!.getBoundingClientRect();
+    const axisYActual = axisRect.top - tlRect.top + axisRect.height / 2;
+
+    const lines: { id: string; path: string; totalLength: number }[] = [];
+
+    const rangeDays = scaleMeta[scale].rangeDays;
+    const pxPerDay = width / rangeDays;
+    const axisStart = axisDates.start;
+    const xEventForDate = (date: string) =>
+      dateToX(date, axisStart, pxPerDay);
+
+    for (const photo of positionedPersonal) {
+      if (!visiblePhotoIds.has(photo.id)) continue;
+      if (cardDragging === photo.id) continue;
+      if (isDirty(photo.id)) continue;
+      const card = personalCardRefs.current.get(photo.id);
+      if (!card) continue;
+
+      const cardRect = card.getBoundingClientRect();
+      const cardLeft = cardRect.left - tlRect.left;
+      const cardBottom = cardRect.top - tlRect.top + cardRect.height;
+      const cardWidth = cardRect.width;
+      const pos = getAnchorPosition(photo.id);
+      const anchorPct = pos === "left" ? 0 : pos === "center" ? 0.5 : 1;
+      const anchorX = cardLeft + cardWidth * anchorPct;
+      const xEvent = xEventForDate(photo.date) + photo.offsetXDays * pxPerDay;
+
+      const { path, totalLength } = computeLinePath(
+        anchorX,
+        cardBottom,
+        xEvent,
+        axisYActual,
+        true
+      );
+      lines.push({ id: photo.id, path, totalLength });
+    }
+
+    for (const ev of positionedHistorical) {
+      if (!visibleHistIds.has(ev.id)) continue;
+      const card = historicalCardRefs.current.get(ev.id);
+      if (!card) continue;
+
+      const cardRect = card.getBoundingClientRect();
+      const cardLeft = cardRect.left - tlRect.left;
+      const cardWidth = cardRect.width;
+      const pos = getAnchorPosition(ev.id);
+      const anchorPct = pos === "left" ? 0 : pos === "center" ? 0.5 : 1;
+      const anchorX = cardLeft + cardWidth * anchorPct;
+      const xEvent = xEventForDate(ev.date);
+
+      const { path, totalLength } = computeLinePath(
+        anchorX,
+        ev.yTop,
+        xEvent,
+        axisYActual,
+        false
+      );
+      lines.push({ id: ev.id, path, totalLength });
+    }
+
+    setLinesData(lines);
+  }, [
+    positionedPersonal,
+    positionedHistorical,
+    visiblePhotoIds,
+    visibleHistIds,
+    layoutInfo,
+    scale,
+    axisDates,
+    pendingOffsets,
+    cardDragging,
+  ]);
+
+  const resetLineAnimation = (id: string) => {
+    seenInViewportRef.current.delete(id);
+    setAnimatedLines((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    scheduleScrollStopRef.current();
+  };
 
   const handleAddPhoto = (file: File, date: string, caption: string) => {
     const safeDate = date > todayStr() ? todayStr() : date;
@@ -415,18 +758,17 @@ function App() {
           offsetXDays: 0,
         };
         return savePhoto(record).then(() => {
-          const imageUrl = URL.createObjectURL(previewBlob);
-          objectUrlsRef.current.set(id, imageUrl);
+          const image = URL.createObjectURL(previewBlob);
+          objectUrlsRef.current.set(id, image);
           setPersonalPhotos((prev) => [
             ...prev,
             {
               id,
               title: record.title,
               date: record.date,
-              type: "personal",
-              imageUrl,
-              offsetY: 0,
+              image,
               offsetXDays: 0,
+              offsetY: 0,
             },
           ]);
         });
@@ -442,18 +784,17 @@ function App() {
           offsetXDays: 0,
         };
         savePhoto(record).then(() => {
-          const imageUrl = URL.createObjectURL(file);
-          objectUrlsRef.current.set(id, imageUrl);
+          const image = URL.createObjectURL(file);
+          objectUrlsRef.current.set(id, image);
           setPersonalPhotos((prev) => [
             ...prev,
             {
               id,
               title: record.title,
               date: record.date,
-              type: "personal",
-              imageUrl,
-              offsetY: 0,
+              image,
               offsetXDays: 0,
+              offsetY: 0,
             },
           ]);
         });
@@ -463,11 +804,10 @@ function App() {
   const handleConfirmOffsets = (id: string) => {
     const pend = pendingOffsets[id];
     if (!pend) return;
+    setCardDragging(null);
     setPersonalPhotos((prev) =>
       prev.map((p) =>
-        p.id === id
-          ? { ...p, offsetXDays: pend.offsetXDays, offsetY: pend.offsetY }
-          : p
+        p.id === id ? { ...p, offsetXDays: pend.offsetXDays, offsetY: pend.offsetY } : p
       )
     );
     updatePhotoOffsets(id, pend.offsetY, pend.offsetXDays).catch(() => {});
@@ -476,18 +816,22 @@ function App() {
       delete next[id];
       return next;
     });
+    resetLineAnimation(id);
   };
 
   const handleCancelOffsets = (id: string) => {
+    setCardDragging(null);
     setPendingOffsets((prev) => {
       const next = { ...prev };
       delete next[id];
       return next;
     });
+    resetLineAnimation(id);
   };
 
   const handleDeletePhoto = (id: string) => {
     if (!window.confirm("Удалить фото? Это действие нельзя отменить.")) return;
+    setCardDragging(null);
     const url = objectUrlsRef.current.get(id);
     if (url) {
       URL.revokeObjectURL(url);
@@ -505,15 +849,12 @@ function App() {
     });
   };
 
-  const onWheel: React.WheelEventHandler<HTMLDivElement> = (event) => {
-    event.preventDefault();
-    const direction = event.deltaY > 0 ? 1 : -1;
-
+  const onWheel: React.WheelEventHandler<HTMLDivElement> = (e) => {
+    e.preventDefault();
+    const direction = e.deltaY > 0 ? 1 : -1;
     setScaleIndex((current) => {
       const next = current + direction;
-      if (next < 0 || next >= scales.length) {
-        return current;
-      }
+      if (next < 0 || next >= scales.length) return current;
       return next;
     });
   };
@@ -522,7 +863,7 @@ function App() {
     if (e.button !== 0) return;
     const target = e.target as Element;
     if (target.closest(".card-image") && !e.altKey) return;
-    const photoCard = target.closest(".event-photo");
+    const photoCard = target.closest(".event-personal.event-photo");
     if (e.altKey && photoCard) {
       const id = photoCard.getAttribute("data-event-id");
       if (id) {
@@ -532,16 +873,17 @@ function App() {
         if (ev) {
           setCardDragging(id);
           const active = getActiveOffsets(id);
-          const startOffsetXDays = active.offsetXDays;
-          const startOffsetY = active.offsetY;
           cardDragRef.current = {
             id,
             startX: e.clientX,
             startY: e.clientY,
-            startOffsetXDays,
-            startOffsetY,
+            startOffsetXDays: active.offsetXDays,
+            startOffsetY: active.offsetY,
           };
-          cardDragLastRef.current = { offsetXDays: startOffsetXDays, offsetY: startOffsetY };
+          cardDragLastRef.current = {
+            offsetXDays: active.offsetXDays,
+            offsetY: active.offsetY,
+          };
         }
       }
       return;
@@ -557,7 +899,6 @@ function App() {
     if (!isDragging) return;
     const el = timelineRef.current;
     if (!el) return;
-
     const onMouseMove = (e: MouseEvent) => {
       if (!dragRef.current) return;
       const { startX, startCenterMs } = dragRef.current;
@@ -570,12 +911,10 @@ function App() {
         clampCenterToToday(new Date(startCenterMs - deltaMs), scale)
       );
     };
-
     const onMouseUp = () => {
       setIsDragging(false);
       dragRef.current = null;
     };
-
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
     return () => {
@@ -588,10 +927,8 @@ function App() {
     if (!cardDragging || !cardDragRef.current) return;
     const el = timelineRef.current;
     if (!el) return;
-
     const maxOffset = MAX_OFFSET_DAYS[scale];
     const rangeDays = scaleMeta[scale].rangeDays;
-
     const onMouseMove = (e: MouseEvent) => {
       if (!cardDragRef.current) return;
       const { id, startX, startY, startOffsetXDays, startOffsetY } =
@@ -601,15 +938,14 @@ function App() {
       const deltaY = e.clientY - startY;
       const deltaDays = (deltaX / width) * rangeDays;
       const rawX = startOffsetXDays + deltaDays;
-      const offsetXDays = Math.round(
-        Math.max(-maxOffset, Math.min(maxOffset, rawX)) * 10
-      ) / 10;
+      const offsetXDays =
+        Math.round(
+          Math.max(-maxOffset, Math.min(maxOffset, rawX)) * 10
+        ) / 10;
       const offsetY = startOffsetY + deltaY;
       cardDragLastRef.current = { offsetXDays, offsetY };
-
       setPendingOffsets((prev) => ({ ...prev, [id]: { offsetXDays, offsetY } }));
     };
-
     const onMouseUp = () => {
       if (!cardDragRef.current) return;
       const { id } = cardDragRef.current;
@@ -617,15 +953,10 @@ function App() {
       const offsetXDays =
         last?.offsetXDays ?? cardDragRef.current.startOffsetXDays;
       const offsetY = last?.offsetY ?? cardDragRef.current.startOffsetY;
-      setPendingOffsets((prev) => ({
-        ...prev,
-        [id]: { offsetXDays, offsetY },
-      }));
-      setCardDragging(null);
+      setPendingOffsets((prev) => ({ ...prev, [id]: { offsetXDays, offsetY } }));
       cardDragRef.current = null;
       cardDragLastRef.current = null;
     };
-
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
     return () => {
@@ -658,10 +989,7 @@ function App() {
       )}
 
       {overlayPhotoId && (
-        <div
-          className="overlay"
-          onClick={() => setOverlayPhotoId(null)}
-        >
+        <div className="overlay" onClick={() => setOverlayPhotoId(null)}>
           {overlayUrl && (
             <img
               src={overlayUrl}
@@ -677,7 +1005,7 @@ function App() {
         className={`timeline ${isDragging ? "timeline-dragging" : ""}`}
         onMouseDown={onTimelineMouseDown}
       >
-        <div className="axis">
+        <div ref={axisRef} className="axis">
           {axisTicks.map((t) => (
             <div
               key={t.date.getTime()}
@@ -696,100 +1024,52 @@ function App() {
           </span>
         </div>
 
-        {positionedEvents.map((event) => (
-          <article
-            key={event.id}
-            data-event-id={event.id}
-            className={`event ${event.type} ${event.imageUrl ? "event-photo" : ""} ${cardDragging === event.id ? "event-photo-dragging" : ""} ${altHeld && event.imageUrl ? "event-photo-grab" : ""}`}
-            style={{
-              left: `${event.xPercent}%`,
-              ...(event.type === "personal" && {
-                transform: (event as { isManual?: boolean }).isManual
-                  ? `translate(-50%, calc(-100% + ${event.offsetY ?? 0}px))`
-                  : `translate(-50%, calc(-100% - ${(event.laneIndex ?? 0) * LANE_HEIGHT}px))`,
-              }),
-            }}
-          >
-            <div className="dot" />
-            <div className="card">
-              {event.imageUrl ? (() => {
-                const saved = {
-                  offsetXDays:
-                    personalPhotos.find((p) => p.id === event.id)
-                      ?.offsetXDays ?? 0,
-                  offsetY:
-                    personalPhotos.find((p) => p.id === event.id)
-                      ?.offsetY ?? 0,
-                };
-                const pend = pendingOffsets[event.id];
-                const isDirty =
-                  pend &&
-                  (Math.abs(pend.offsetXDays - saved.offsetXDays) > EPS ||
-                    Math.abs(pend.offsetY - saved.offsetY) > 1);
-                return (
-                  <>
-                    {isDirty && (
-                      <>
-                        <button
-                          type="button"
-                          className="card-delete"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeletePhoto(event.id);
-                          }}
-                          title="Удалить"
-                          aria-label="Удалить"
-                        >
-                          ×
-                        </button>
-                        <button
-                          type="button"
-                          className="card-confirm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleConfirmOffsets(event.id);
-                          }}
-                          title="Принять"
-                          aria-label="Принять"
-                        >
-                          ✅
-                        </button>
-                        <button
-                          type="button"
-                          className="card-reset"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCancelOffsets(event.id);
-                          }}
-                          title="Отменить"
-                          aria-label="Отменить"
-                        >
-                          ↺
-                        </button>
-                      </>
-                    )}
-                    <img
-                      src={event.imageUrl}
-                      alt={event.title}
-                      className={`card-image ${isDirty ? "" : "card-image-clickable"}`}
-                      draggable={false}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (!isDirty) setOverlayPhotoId(event.id);
-                      }}
-                    />
-                    <div className="card-caption">{event.title}</div>
-                  </>
-                );
-              })() : (
-                <>
-                  <div className="date">{event.date}</div>
-                  <div className="title">{event.title}</div>
-                </>
-              )}
+        <svg className="timeline-lines-overlay" aria-hidden>
+          {linesData.map((line) => (
+            <MarkerLink
+              key={line.id}
+              path={line.path}
+              totalLength={line.totalLength}
+              animate={animatedLines.has(line.id)}
+            />
+          ))}
+        </svg>
+
+        {layoutInfo && (
+          <>
+            <PersonalLayer
+              photos={positionedPersonal}
+              axisY={layoutInfo.axisY}
+              cardRefsMap={personalCardRefs}
+              cardDragging={cardDragging}
+              pendingOffsets={pendingOffsets}
+              getActiveOffsets={getActiveOffsets}
+              isDirty={isDirty}
+              altHeld={altHeld}
+              onDelete={handleDeletePhoto}
+              onConfirmOffsets={handleConfirmOffsets}
+              onCancelOffsets={handleCancelOffsets}
+              onOverlayOpen={setOverlayPhotoId}
+            />
+            <div
+              className="historical-zone"
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: layoutInfo.axisY,
+                height: HIST_ZONE_HEIGHT,
+                overflow: "visible",
+              }}
+            >
+              <HistoricalLayer
+                events={positionedHistorical}
+                axisY={layoutInfo.axisY}
+                cardRefsMap={historicalCardRefs}
+              />
             </div>
-          </article>
-        ))}
+          </>
+        )}
       </main>
     </div>
   );

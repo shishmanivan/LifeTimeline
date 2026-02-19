@@ -136,46 +136,67 @@ body {
 .event {
   position: absolute;
   transform: translateX(-50%);
+  z-index: 1;
 }
 
-.event .dot {
-  width: 10px;
-  height: 10px;
-  border: 1px solid #111;
-  background: #fff;
-  border-radius: 999px;
-  margin: 0 auto;
-}
-
+/* Unified museum-style card: personal + historical */
 .event .card {
-  width: 170px;
-  border: 1px solid #111;
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  padding: 0;
+  border: 1px solid #222;
   background: #fff;
-  padding: 8px;
+  width: 120px;
+  overflow: hidden;
+  position: relative;
 }
 
-.event.personal {
-  top: 50%;
-  transform: translate(-50%, -100%);
-  margin-top: -16px;
-}
-
-.event.personal .card {
+/* Personal: above axis */
+.event.event-personal .card {
   margin-top: -72px;
 }
 
-.event-photo.event.personal .card {
+.event-photo.event.event-personal .card {
   margin-top: -135px;
 }
 
-.event.historical {
-  top: 50%;
-  margin-top: 16px;
-}
-
-.event.historical .card {
+/* Historical: below axis */
+.event.event-historical .card {
   margin-top: 8px;
 }
+
+/* Image block: aspect-ratio, no gaps */
+.cardImage {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+}
+
+.cardImage img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card-image-placeholder {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* Text block: tight padding, no fixed height */
+.cardTitle {
+  padding: 4px 6px 4px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.15;
+  white-space: normal;
+  overflow: visible;
+  display: block;
+}
+
 
 .date {
   font-size: 11px;
@@ -254,13 +275,6 @@ body {
   cursor: not-allowed;
 }
 
-/* Photo card */
-.event-photo .card {
-  width: 120px;
-  padding: 0;
-  overflow: hidden;
-  position: relative;
-}
 
 .event-photo {
   cursor: default;
@@ -276,8 +290,8 @@ body {
 
 .card-delete {
   position: absolute;
-  bottom: 2px;
-  right: 46px;
+  top: 2px;
+  right: 2px;
   width: 20px;
   height: 20px;
   padding: 0;
@@ -334,15 +348,40 @@ body {
   color: #fff;
 }
 
-.card-image {
-  display: block;
-  width: 100%;
-  height: 120px;
-  object-fit: cover;
+
+.card-historical {
+  border-color: rgba(0, 0, 0, 0.35);
+  border-style: dashed;
 }
 
 .card-image-clickable {
   cursor: pointer;
+}
+
+/* Timeline marker lines overlay - behind cards */
+.timeline-lines-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.timeline-line-path {
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.4);
+  stroke-width: 1;
+}
+
+.timeline-line-path.line-animate {
+  animation: line-draw 1s ease-out forwards;
+}
+
+@keyframes line-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
 /* Original image overlay */
@@ -364,12 +403,33 @@ body {
   cursor: default;
 }
 
+/* card-caption: alias for cardTitle */
 .card-caption {
-  padding: 3px 4px;
-  font-size: 11px;
-  line-height: 1.2;
-  overflow: hidden;
+  padding: 4px 6px 4px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.15;
+  white-space: normal;
+  overflow: visible;
+  display: block;
+}
+
+/* Personal: compact padding */
+.titlePersonal {
+  padding: 4px 6px 4px;
+  margin: 0;
+}
+
+/* Historical: clamp 3 lines, expand to 4 if overflow, frame right below text */
+.titleHistorical {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  padding: 4px 6px 4px;
+  margin: 0;
+}
+
+.card-historical.expanded .titleHistorical {
+  -webkit-line-clamp: 4;
 }
