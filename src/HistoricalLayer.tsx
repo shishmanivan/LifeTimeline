@@ -1,10 +1,31 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HistoricalEvent } from "./history/types";
+
+/** Resolve image URL: HistoryPics > cached > previewBlob > thumbnailUrl */
+function useResolvedImageUrl(
+  event: HistoricalEvent,
+  getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined,
+  historicalImageUrls?: Record<string, string>
+): string | undefined {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const local = getLocalImageUrl?.(event);
+  const cached = historicalImageUrls?.[event.id];
+  const thumb = event.thumbnailUrl;
+
+  useEffect(() => {
+    if (event.previewBlob && !local && !cached) {
+      const url = URL.createObjectURL(event.previewBlob);
+      setBlobUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+  }, [event.previewBlob, event.id, local, cached]);
+
+  return local ?? cached ?? blobUrl ?? thumb;
+}
 
 export type PositionedHistorical = HistoricalEvent & {
   xPx: number;
   laneIndex: number;
-  imageUrl?: string;
   /** Top of card in timeline coords; anchorY for line */
   yTop: number;
   /** Top of article relative to zone (zone starts at axisY) */
@@ -80,27 +101,41 @@ type HistoricalCardProps = {
   event: PositionedHistorical;
   cardRefsMap: React.MutableRefObject<Map<string, HTMLDivElement>>;
   top: number;
+  getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
+  historicalImageUrls?: Record<string, string>;
 };
 
 function HistoricalCard({
   event,
   cardRefsMap,
   top,
+  getLocalImageUrl,
+  historicalImageUrls,
 }: HistoricalCardProps) {
-  const titleRef = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
+  const imageUrl = useResolvedImageUrl(event, getLocalImageUrl, historicalImageUrls);
+  const [imgLoaded, setImgLoaded] = useState(false);
 
-  useLayoutEffect(() => {
-    const el = titleRef.current;
-    if (!el) return;
-    const isOverflowing = el.scrollHeight > el.clientHeight;
-    setExpanded(isOverflowing);
-  }, [event.title]);
+  if (import.meta.env.DEV) {
+    const isTikTok =
+      event.date === "2019-02-15" &&
+      (event.title?.toLowerCase().includes("tiktok") ?? false);
+    if (isTikTok) {
+      console.log("[history-debug]", {
+        id: event.id,
+        date: event.date,
+        laneIndex: event.laneIndex,
+        computedTop: top,
+        appliedOffsetY: 0,
+        recordOffsetY: undefined,
+        recordOffsetXDays: undefined,
+      });
+    }
+  }
 
   return (
     <article
       data-event-id={event.id}
-      className={`event event-historical ${event.imageUrl ? "event-photo" : ""}`}
+      className={`event event-historical ${imageUrl ? "event-photo" : ""}`}
       style={{
         left: `${event.xPx}px`,
         top: `${top}px`,
@@ -108,24 +143,28 @@ function HistoricalCard({
       }}
     >
       <div
-        className={`card card-historical ${expanded ? "expanded" : ""}`}
+        className="card card-historical"
         ref={(el) => {
           if (el) cardRefsMap.current.set(event.id, el);
           else cardRefsMap.current.delete(event.id);
         }}
       >
-        <div className="cardImage">
-          {event.imageUrl ? (
-            <img src={event.imageUrl} alt={event.title} />
-          ) : (
-            <div className="card-image-placeholder" />
+        <div className="cardImage cardImage-historical">
+          <div className="card-image-placeholder" aria-hidden="true" />
+          {imageUrl && (
+            <img
+              src={imageUrl}
+              alt={event.title}
+              onLoad={() => setImgLoaded(true)}
+              className="card-image-img"
+              style={{
+                opacity: imgLoaded ? 1 : 0,
+                transition: "opacity 200ms ease-out",
+              }}
+            />
           )}
         </div>
-        <div
-          ref={titleRef}
-          className="cardTitle titleHistorical"
-          title={event.summary ?? ""}
-        >
+        <div className="cardTitle titleHistorical" title={event.summary ?? ""}>
           {event.title}
         </div>
       </div>
@@ -139,6 +178,8 @@ type HistoricalLayerProps = {
   cardRefsMap: React.MutableRefObject<Map<string, HTMLDivElement>>;
   /** When inside zone wrapper: use topRelativeToZone for positioning */
   insideZone?: boolean;
+  getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
+  historicalImageUrls?: Record<string, string>;
 };
 
 export function HistoricalLayer({
@@ -146,6 +187,8 @@ export function HistoricalLayer({
   axisY,
   cardRefsMap,
   insideZone = true,
+  getLocalImageUrl,
+  historicalImageUrls,
 }: HistoricalLayerProps) {
   return (
     <>
@@ -161,6 +204,8 @@ export function HistoricalLayer({
             event={event}
             cardRefsMap={cardRefsMap}
             top={top}
+            getLocalImageUrl={getLocalImageUrl}
+            historicalImageUrls={historicalImageUrls}
           />
         );
       })}

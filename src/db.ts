@@ -1,7 +1,7 @@
 import type { HistoricalEvent } from "./history/types";
 
 const DB_NAME = "LifeTimelineDB";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const STORE_NAME = "photos";
 const HISTORICAL_STORE = "historicalEvents";
 
@@ -22,13 +22,17 @@ function openDB(): Promise<IDBDatabase> {
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
     request.onupgradeneeded = (e) => {
-      const db = (e.target as IDBOpenDBRequest).result;
+      const ev = e as IDBVersionChangeEvent & { target: IDBOpenDBRequest };
+      const db = ev.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: "id" });
       }
       if (!db.objectStoreNames.contains(HISTORICAL_STORE)) {
         const store = db.createObjectStore(HISTORICAL_STORE, { keyPath: "id" });
         store.createIndex("date", "date");
+      }
+      if ((ev.newVersion ?? db.version) === 6 && ev.target.transaction) {
+        migrateHistoricalStripLegacyOffsets(ev.target.transaction);
       }
     };
   });
@@ -105,10 +109,13 @@ export async function bulkUpsertHistoricalEvents(
   events: HistoricalEvent[]
 ): Promise<void> {
   const db = await openDB();
+  const sanitized = events.map((e) =>
+    sanitizeHistoricalEvent(e as unknown as Record<string, unknown>)
+  );
   return new Promise((resolve, reject) => {
     const tx = db.transaction(HISTORICAL_STORE, "readwrite");
     const store = tx.objectStore(HISTORICAL_STORE);
-    for (const event of events) {
+    for (const event of sanitized) {
       store.put(event);
     }
     tx.onerror = () => reject(tx.error);
@@ -117,6 +124,73 @@ export async function bulkUpsertHistoricalEvents(
       resolve();
     };
   });
+}
+
+const HISTORICAL_WHITELIST: (keyof HistoricalEvent)[] = [
+  "id",
+  "date",
+  "url",
+  "title",
+  "lang",
+  "thumbnailUrl",
+  "previewBlob",
+  "tags",
+  "sourceFile",
+  "sourceLine",
+  "updatedAt",
+  "enrichVersion",
+  "summary",
+  "importance",
+];
+
+function sanitizeHistoricalEvent(raw: Record<string, unknown>): HistoricalEvent {
+  if (import.meta.env.DEV) {
+    const legacy: Record<string, unknown> = {};
+    if ("offsetY" in raw && raw.offsetY !== undefined)
+      legacy.recordOffsetY = raw.offsetY;
+    if ("offsetXDays" in raw && raw.offsetXDays !== undefined)
+      legacy.recordOffsetXDays = raw.offsetXDays;
+    if ("lane" in raw && raw.lane !== undefined) legacy.lane = raw.lane;
+    if ("manualPosition" in raw && raw.manualPosition !== undefined)
+      legacy.manualPosition = raw.manualPosition;
+    if (Object.keys(legacy).length > 0) {
+      console.log("[history-debug] raw record had legacy layout fields", {
+        id: raw.id,
+        date: raw.date,
+        ...legacy,
+      });
+    }
+  }
+  const out: Record<string, unknown> = {};
+  for (const k of HISTORICAL_WHITELIST) {
+    if (k in raw && raw[k] !== undefined) out[k] = raw[k];
+  }
+  return out as HistoricalEvent;
+}
+
+function migrateHistoricalStripLegacyOffsets(tx: IDBTransaction): void {
+  const store = tx.objectStore(HISTORICAL_STORE);
+  const req = store.getAll();
+  req.onsuccess = () => {
+    const raw = (req.result || []) as Record<string, unknown>[];
+    let cleaned = 0;
+    for (const r of raw) {
+      if (
+        "offsetY" in r ||
+        "offsetXDays" in r ||
+        "lane" in r ||
+        "manualPosition" in r
+      ) {
+        store.put(sanitizeHistoricalEvent(r));
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      console.log(
+        `[history] cleaned ${cleaned} records with legacy offsets`
+      );
+    }
+  };
 }
 
 export async function getHistoricalEventsInRange(
@@ -131,7 +205,10 @@ export async function getHistoricalEventsInRange(
     const range = IDBKeyRange.bound(start, end);
     const request = index.getAll(range);
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result || []);
+    request.onsuccess = () => {
+      const raw = request.result || [];
+      resolve(raw.map((r) => sanitizeHistoricalEvent(r as Record<string, unknown>)));
+    };
     tx.oncomplete = () => db.close();
   });
 }
@@ -152,7 +229,50 @@ export async function getHistoricalEvent(
     const store = tx.objectStore(HISTORICAL_STORE);
     const request = store.get(id);
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result ?? null);
+    request.onsuccess = () => {
+      const raw = request.result;
+      resolve(
+        raw
+          ? sanitizeHistoricalEvent(raw as Record<string, unknown>)
+          : null
+      );
+    };
     tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getAllHistoricalEvents(): Promise<HistoricalEvent[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(HISTORICAL_STORE, "readonly");
+    const store = tx.objectStore(HISTORICAL_STORE);
+    const request = store.getAll();
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const raw = request.result || [];
+      resolve(
+        raw.map((r) => sanitizeHistoricalEvent(r as Record<string, unknown>))
+      );
+    };
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function deleteHistoricalEventsByIds(
+  ids: string[]
+): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(HISTORICAL_STORE, "readwrite");
+    const store = tx.objectStore(HISTORICAL_STORE);
+    for (const id of ids) {
+      store.delete(id);
+    }
+    tx.onerror = () => reject(tx.error);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
   });
 }

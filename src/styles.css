@@ -171,6 +171,7 @@ body {
   width: 100%;
   aspect-ratio: 4 / 3;
   overflow: hidden;
+  position: relative;
 }
 
 .cardImage img {
@@ -178,6 +179,21 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* Historical: placeholder always present, img overlays when loaded */
+.cardImage-historical .card-image-placeholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.cardImage-historical .card-image-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .card-image-placeholder {
@@ -420,16 +436,13 @@ body {
   margin: 0;
 }
 
-/* Historical: clamp 3 lines, expand to 4 if overflow, frame right below text */
+/* Historical: max 4 lines, height auto, no empty space if fewer lines */
 .titleHistorical {
   display: -webkit-box;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
   overflow: hidden;
+  height: auto;
   padding: 4px 6px 4px;
   margin: 0;
-}
-
-.card-historical.expanded .titleHistorical {
-  -webkit-line-clamp: 4;
 }

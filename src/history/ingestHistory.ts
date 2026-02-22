@@ -1,7 +1,10 @@
 import {
   bulkUpsertHistoricalEvents,
+  deleteHistoricalEventsByIds,
+  getAllHistoricalEvents,
   getHistoricalEvent,
 } from "../db";
+import manifest from "./HistoryPics/_manifest.json";
 import { generatePreviewBlob } from "../imagePreview";
 import type { HistoricalEvent } from "./types";
 
@@ -183,6 +186,7 @@ async function runHistoryIngestInternal(): Promise<void> {
 
   let totalEvents = 0;
   let totalErrors = 0;
+  const allFromDb = await getAllHistoricalEvents();
 
   for (const [path, loader] of Object.entries(modules)) {
     const fileName = path.split("/").pop() ?? path;
@@ -198,6 +202,22 @@ async function runHistoryIngestInternal(): Promise<void> {
     const { rows, errors } = parseTsv(raw, fileName);
     totalErrors += errors;
 
+    const currentIds = new Set<string>();
+    for (const row of rows) {
+      const id = await sha1(`${row.date}|${row.url}`);
+      currentIds.add(id);
+    }
+
+    const toRemove = allFromDb.filter(
+      (e) => e.sourceFile === fileName && !currentIds.has(e.id)
+    );
+    if (toRemove.length > 0) {
+      await deleteHistoricalEventsByIds(toRemove.map((e) => e.id));
+      if (import.meta.env.DEV) {
+        console.log(`[history] Removed ${toRemove.length} events from ${fileName}`);
+      }
+    }
+
     const events: HistoricalEvent[] = [];
     const tasks = rows.map((row) => async (): Promise<HistoricalEvent | null> => {
       const idStr = `${row.date}|${row.url}`;
@@ -206,29 +226,34 @@ async function runHistoryIngestInternal(): Promise<void> {
       const existing = await getHistoricalEvent(id);
       if (!needsEnrich(existing, row)) return null;
 
+      const hasLocalPic = (manifest as Record<string, string>)[idStr] != null;
       let thumbnailUrl = row.image ? row.image.trim() : undefined;
       let title = row.title.trim() || undefined;
       let summary: string | undefined;
 
-      if (!thumbnailUrl && row.url.includes("wikipedia.org")) {
+      if (row.url.includes("wikipedia.org")) {
         try {
           const wiki = await fetchWikiThumbnail(row.url);
-          if (!thumbnailUrl) thumbnailUrl = wiki.thumbnailUrl;
           if (!title) title = wiki.title;
           summary = wiki.extract?.slice(0, 300);
+          if (!thumbnailUrl && !hasLocalPic) thumbnailUrl = wiki.thumbnailUrl;
         } catch {
           /* leave empty */
         }
       }
 
       let previewBlob: Blob | undefined;
-      if (thumbnailUrl) {
+      if (thumbnailUrl && !hasLocalPic) {
         try {
           const fullBlob = await downloadBlob(thumbnailUrl);
           previewBlob = await generatePreviewBlob(fullBlob, 320);
         } catch {
           /* leave empty */
         }
+      }
+      if (hasLocalPic) {
+        thumbnailUrl = undefined;
+        previewBlob = undefined;
       }
 
       const ev: HistoricalEvent = {

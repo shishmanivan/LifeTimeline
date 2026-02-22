@@ -12,6 +12,7 @@ import { runHistoryIngest } from "./history/ingestHistory";
 import { generatePreviewBlob } from "./imagePreview";
 import { dateToX, computeLinePath } from "./timelineUtils";
 import { MarkerLink } from "./MarkerLink";
+import { getLocalImageUrl } from "./history/localPics";
 import {
   PersonalLayer,
   type PersonalPhoto,
@@ -454,8 +455,13 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     const { start, end } = axisDates;
-    const startISO = start.toISOString().slice(0, 10);
-    const endISO = end.toISOString().slice(0, 10);
+    const rangeDays = scaleMeta[scale].rangeDays;
+    const overscanDays = Math.min(90, Math.floor(rangeDays / 2));
+    const overscanMs = overscanDays * MS_IN_DAY;
+    const fetchStart = new Date(start.getTime() - overscanMs);
+    const fetchEnd = new Date(end.getTime() + overscanMs);
+    const startISO = fetchStart.toISOString().slice(0, 10);
+    const endISO = fetchEnd.toISOString().slice(0, 10);
     (async () => {
       const events = await getHistoricalEventsInRange(startISO, endISO);
       if (!cancelled) setHistoricalEvents(events);
@@ -463,7 +469,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [axisDates]);
+  }, [axisDates, scale]);
 
   const positionedPersonal = useMemo((): PositionedPhoto[] => {
     if (!layoutInfo) return [];
@@ -523,28 +529,42 @@ function App() {
     pendingOffsets,
   ]);
 
-  const historicalWithLanes = useMemo(
-    () => assignHistoricalLanes(historicalEvents),
-    [historicalEvents]
-  );
+  const historicalWithLanes = useMemo(() => {
+    if (import.meta.env.DEV) {
+      console.debug("[layout] historicalWithLanes recompute", {
+        eventCount: historicalEvents.length,
+      });
+    }
+    return assignHistoricalLanes(historicalEvents);
+  }, [historicalEvents]);
 
   const positionedHistorical = useMemo((): PositionedHistorical[] => {
+    if (import.meta.env.DEV) {
+      console.debug("[layout] historical recompute", {
+        deps: { historicalWithLanes: historicalWithLanes.length, layoutInfo: !!layoutInfo, scale, axisDates },
+      });
+    }
     if (!layoutInfo) return [];
     const { width, axisY } = layoutInfo;
     const rangeDays = scaleMeta[scale].rangeDays;
     const pxPerDay = width / rangeDays;
     const axisStart = axisDates.start;
     const minImportance = getMinImportanceForScale(scale);
+    const showCompactOnly = scale === "30d" || scale === "90d";
+    const isCompactOnlyFile = (f: string) => /-2\./.test(f); // sources/*-2.tsv: only 30d/90d
 
-    const filtered = historicalWithLanes.filter(
-      (e) => (e.importance ?? 3) >= minImportance
-    );
+    const filtered = historicalWithLanes.filter((e) => {
+      if (isCompactOnlyFile(e.sourceFile) && !showCompactOnly) return false;
+      return (e.importance ?? 3) >= minImportance;
+    });
+
+    const overscanPx = width * 1.5;
+    const xMin = -overscanPx;
+    const xMax = width + overscanPx;
 
     return filtered
       .map((e) => {
         const xPx = dateToX(e.date, axisStart, pxPerDay);
-        const imageUrl =
-          historicalImageUrls[e.id] ?? e.thumbnailUrl ?? undefined;
         const laneIdx = Math.min(e.laneIndex, MAX_LANES - 1);
         const yTop =
           axisY +
@@ -554,15 +574,13 @@ function App() {
         return {
           ...e,
           xPx,
-          imageUrl,
           yTop,
           topRelativeToZone,
         };
       })
-      .filter((e) => e.xPx >= -50 && e.xPx <= width + 50);
+      .filter((e) => e.xPx >= xMin && e.xPx <= xMax);
   }, [
     historicalWithLanes,
-    historicalImageUrls,
     layoutInfo,
     scale,
     axisDates,
@@ -1066,6 +1084,8 @@ function App() {
                 events={positionedHistorical}
                 axisY={layoutInfo.axisY}
                 cardRefsMap={historicalCardRefs}
+                getLocalImageUrl={getLocalImageUrl}
+                historicalImageUrls={historicalImageUrls}
               />
             </div>
           </>
