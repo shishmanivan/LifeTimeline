@@ -1,0 +1,448 @@
+:root {
+  font-family: "Segoe UI", Arial, sans-serif;
+  color: #111;
+  background: #fff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.page {
+  height: 100vh;
+  width: 100vw;
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+  background: #fff;
+  color: #111;
+}
+
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #111;
+  padding: 0 16px 8px;
+}
+
+.top-bar h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.btn-add-photo {
+  padding: 6px 12px;
+  font-size: 12px;
+  border: 1px solid #111;
+  background: #fff;
+  cursor: pointer;
+}
+
+.btn-add-photo:hover {
+  background: #f5f5f5;
+}
+
+.scale {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.timeline {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: visible;
+  cursor: grab;
+}
+
+.timeline:active {
+  cursor: grabbing;
+}
+
+.timeline.timeline-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.axis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 5px;
+  margin-top: -2.5px;
+  background: #333;
+  overflow: visible;
+}
+
+.axis-tick {
+  position: absolute;
+  width: 1px;
+  background: #333;
+  transform: translateX(-50%);
+}
+
+.axis-tick-major {
+  bottom: 100%;
+  height: 14px;
+  margin-bottom: 2.5px;
+}
+
+.axis-tick-minor {
+  top: 100%;
+  height: 8px;
+  margin-top: 2.5px;
+}
+
+.axis-date {
+  position: absolute;
+  top: -20px;
+  font-size: 11px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.axis-date-start {
+  left: 0;
+}
+
+.axis-date-mid {
+  left: 50%;
+}
+
+.axis-date-end {
+  left: 100%;
+}
+
+.event {
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 1;
+}
+
+/* Unified museum-style card: personal + historical */
+.event .card {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  padding: 0;
+  border: 1px solid #222;
+  background: #fff;
+  width: 120px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Personal: above axis */
+.event.event-personal .card {
+  margin-top: -72px;
+}
+
+.event-photo.event.event-personal .card {
+  margin-top: -135px;
+}
+
+/* Historical: below axis */
+.event.event-historical .card {
+  margin-top: 8px;
+}
+
+/* Image block: aspect-ratio, no gaps */
+.cardImage {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  position: relative;
+}
+
+.cardImage img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Historical: placeholder always present, img overlays when loaded */
+.cardImage-historical .card-image-placeholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.cardImage-historical .card-image-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.card-image-placeholder {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* Text block: tight padding, no fixed height */
+.cardTitle {
+  padding: 4px 6px 4px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.15;
+  white-space: normal;
+  overflow: visible;
+  display: block;
+}
+
+
+.date {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: #fff;
+  border: 1px solid #111;
+  padding: 24px;
+  min-width: 280px;
+}
+
+.modal-title {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-field {
+  margin-bottom: 12px;
+}
+
+.modal-field label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.modal-field input[type="file"],
+.modal-field input[type="date"],
+.modal-field input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #111;
+  font-size: 13px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.modal-actions button {
+  padding: 6px 14px;
+  font-size: 12px;
+  border: 1px solid #111;
+  background: #fff;
+  cursor: pointer;
+}
+
+.modal-actions button:hover {
+  background: #f5f5f5;
+}
+
+.modal-actions button[type="submit"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
+.event-photo {
+  cursor: default;
+}
+
+.event-photo.event-photo-grab {
+  cursor: grab;
+}
+
+.event-photo.event-photo-dragging {
+  cursor: grabbing;
+}
+
+.card-delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #111;
+  background: #fff;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.card-delete:hover {
+  background: #111;
+  color: #fff;
+}
+
+.card-confirm {
+  position: absolute;
+  bottom: 2px;
+  right: 24px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #111;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.card-confirm:hover {
+  background: #111;
+  color: #fff;
+}
+
+.card-reset {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #111;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.card-reset:hover {
+  background: #111;
+  color: #fff;
+}
+
+
+.card-historical {
+  border-color: rgba(0, 0, 0, 0.35);
+  border-style: dashed;
+}
+
+.card-image-clickable {
+  cursor: pointer;
+}
+
+/* Timeline marker lines overlay - behind cards */
+.timeline-lines-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.timeline-line-path {
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.4);
+  stroke-width: 1;
+}
+
+.timeline-line-path.line-animate {
+  animation: line-draw 1s ease-out forwards;
+}
+
+@keyframes line-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Original image overlay */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  cursor: pointer;
+}
+
+.overlay img {
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
+  cursor: default;
+}
+
+/* card-caption: alias for cardTitle */
+.card-caption {
+  padding: 4px 6px 4px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.15;
+  white-space: normal;
+  overflow: visible;
+  display: block;
+}
+
+/* Personal: compact padding */
+.titlePersonal {
+  padding: 4px 6px 4px;
+  margin: 0;
+}
+
+/* Historical: max 4 lines, height auto, no empty space if fewer lines */
+.titleHistorical {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  height: auto;
+  padding: 4px 6px 4px;
+  margin: 0;
+}
