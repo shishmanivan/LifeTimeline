@@ -7,6 +7,7 @@ export type PersonalPhoto = {
   image: string;
   offsetXDays: number;
   offsetY: number;
+  note?: string;
 };
 
 export type PositionedPhoto = PersonalPhoto & {

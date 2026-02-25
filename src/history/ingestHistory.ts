@@ -93,6 +93,7 @@ type WikiPageData = {
   title: string;
   extract?: string;
   thumbnailUrl?: string;
+  ruUrl?: string;
 };
 
 async function fetchWikiThumbnail(url: string): Promise<WikiPageData> {
@@ -100,7 +101,7 @@ async function fetchWikiThumbnail(url: string): Promise<WikiPageData> {
   const params = new URLSearchParams({
     action: "query",
     titles: title,
-    prop: "pageimages|extracts",
+    prop: "pageimages|extracts|langlinks",
     format: "json",
     origin: "*",
     piprop: "thumbnail",
@@ -108,6 +109,8 @@ async function fetchWikiThumbnail(url: string): Promise<WikiPageData> {
     exintro: "1",
     explaintext: "1",
     exlimit: "1",
+    lllang: "ru",
+    llprop: "url",
   });
   const res = await fetch(`${WIKI_API}?${params}`);
   const json = await res.json();
@@ -119,7 +122,10 @@ async function fetchWikiThumbnail(url: string): Promise<WikiPageData> {
   const pageTitle = (page.title as string) ?? title;
   const extract = (page.extract as string) ?? "";
   const thumb = page.thumbnail as { source?: string } | undefined;
-  return { title: pageTitle, extract, thumbnailUrl: thumb?.source };
+  const langlinks = page.langlinks as { lang: string; url?: string }[] | undefined;
+  const ruLink = langlinks?.find((ll) => ll.lang === "ru");
+  const ruUrl = ruLink?.url;
+  return { title: pageTitle, extract, thumbnailUrl: thumb?.source, ruUrl };
 }
 
 async function downloadBlob(url: string): Promise<Blob> {
@@ -231,12 +237,14 @@ async function runHistoryIngestInternal(): Promise<void> {
       let title = row.title.trim() || undefined;
       let summary: string | undefined;
 
+      let ruUrl: string | undefined;
       if (row.url.includes("wikipedia.org")) {
         try {
           const wiki = await fetchWikiThumbnail(row.url);
           if (!title) title = wiki.title;
           summary = wiki.extract?.slice(0, 300);
           if (!thumbnailUrl && !hasLocalPic) thumbnailUrl = wiki.thumbnailUrl;
+          ruUrl = wiki.ruUrl;
         } catch {
           /* leave empty */
         }
@@ -271,6 +279,7 @@ async function runHistoryIngestInternal(): Promise<void> {
         enrichVersion: ENRICH_VERSION,
         summary,
         importance: 3,
+        ruUrl,
       };
       return ev;
     });

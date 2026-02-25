@@ -5,7 +5,9 @@ import {
   getHistoricalEventsInRange,
   savePhoto,
   updatePhotoOffsets,
+  updatePhotoNote,
   updatePhotoPreview,
+  type PhotoRecord,
 } from "./db";
 import type { HistoricalEvent } from "./history/types";
 import { runHistoryIngest } from "./history/ingestHistory";
@@ -29,6 +31,8 @@ import {
   MAX_LANES,
   type PositionedHistorical,
 } from "./HistoricalLayer";
+import { HistoricalEventModal } from "./HistoricalEventModal";
+import { PersonalPhotoModal } from "./PersonalPhotoModal";
 
 export type { Offsets };
 
@@ -186,6 +190,8 @@ function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [overlayPhotoId, setOverlayPhotoId] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
+  const [selectedHistoricalEvent, setSelectedHistoricalEvent] =
+    useState<HistoricalEvent | null>(null);
   const [centerDate, setCenterDate] = useState(() =>
     clampCenterToToday(new Date(), "1y")
   );
@@ -259,6 +265,7 @@ function App() {
           image,
           offsetXDays: r.offsetXDays ?? 0,
           offsetY: r.offsetY ?? 0,
+          note: r.note,
         };
       });
       setPersonalPhotos(photos);
@@ -767,11 +774,11 @@ function App() {
     imageBlobsRef.current.set(id, file);
     generatePreviewBlob(file)
       .then((previewBlob) => {
-        const record = {
+        const record: PhotoRecord = {
           id,
           title: caption || "Фото",
           date: safeDate,
-          type: "personal" as const,
+          type: "personal",
           imageBlob: file,
           previewBlob,
           offsetY: 0,
@@ -789,16 +796,17 @@ function App() {
               image,
               offsetXDays: 0,
               offsetY: 0,
+              note: record.note,
             },
           ]);
         });
       })
       .catch(() => {
-        const record = {
+        const record: PhotoRecord = {
           id,
           title: caption || "Фото",
           date: safeDate,
-          type: "personal" as const,
+          type: "personal",
           imageBlob: file,
           offsetY: 0,
           offsetXDays: 0,
@@ -815,6 +823,7 @@ function App() {
               image,
               offsetXDays: 0,
               offsetY: 0,
+              note: record.note,
             },
           ]);
         });
@@ -883,6 +892,15 @@ function App() {
     if (e.button !== 0) return;
     const target = e.target as Element;
     if (target.closest(".card-image") && !e.altKey) return;
+    const histCard = target.closest(".event-historical");
+    if (histCard) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = histCard.getAttribute("data-event-id");
+      const ev = positionedHistorical.find((x) => x.id === id);
+      if (ev) setSelectedHistoricalEvent(ev);
+      return;
+    }
     const photoCard = target.closest(".event-personal.event-photo");
     if (e.altKey && photoCard) {
       const id = photoCard.getAttribute("data-event-id");
@@ -1009,16 +1027,35 @@ function App() {
       )}
 
       {overlayPhotoId && (
-        <div className="overlay" onClick={() => setOverlayPhotoId(null)}>
-          {overlayUrl && (
-            <img
-              src={overlayUrl}
-              alt=""
-              onClick={(e) => e.stopPropagation()}
-            />
-          )}
-        </div>
+        <PersonalPhotoModal
+          photo={
+            (() => {
+              const p = personalPhotos.find((x) => x.id === overlayPhotoId);
+              return p
+                ? { id: p.id, title: p.title, date: p.date, note: p.note }
+                : null;
+            })()
+          }
+          imageUrl={overlayUrl}
+          isOpen={true}
+          onClose={() => setOverlayPhotoId(null)}
+          onSave={(id, note) => {
+            updatePhotoNote(id, note).then(() => {
+              setPersonalPhotos((prev) =>
+                prev.map((p) => (p.id === id ? { ...p, note } : p))
+              );
+            });
+          }}
+        />
       )}
+
+      <HistoricalEventModal
+        event={selectedHistoricalEvent}
+        isOpen={selectedHistoricalEvent != null}
+        onClose={() => setSelectedHistoricalEvent(null)}
+        getLocalImageUrl={getLocalImageUrl}
+        historicalImageUrls={historicalImageUrls}
+      />
 
       <main
         ref={timelineRef}

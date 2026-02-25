@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { HistoricalEvent } from "./history/types";
 
 /** Resolve image URL: HistoryPics > cached > previewBlob > thumbnailUrl */
-function useResolvedImageUrl(
+export function useResolvedImageUrl(
   event: HistoricalEvent,
   getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined,
   historicalImageUrls?: Record<string, string>
@@ -43,7 +43,7 @@ const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
 /** Stable lane assignment: independent of zoom/pxPerDay */
 export const MAX_LANES = 3;
-export const CANONICAL_WIDTH_DAYS = 24;
+export const CANONICAL_WIDTH_DAYS = 12;
 
 /** Fixed height of zone below axis for historical events */
 export const HIST_ZONE_HEIGHT =

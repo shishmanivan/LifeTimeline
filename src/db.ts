@@ -14,6 +14,8 @@ export type PhotoRecord = {
   previewBlob?: Blob;
   offsetY?: number;
   offsetXDays?: number;
+  /** Post/description text, editable in modal */
+  note?: string;
 };
 
 function openDB(): Promise<IDBDatabase> {
@@ -93,6 +95,15 @@ export async function updatePhotoPreview(
   await savePhoto({ ...record, previewBlob });
 }
 
+export async function updatePhotoNote(
+  id: string,
+  note: string
+): Promise<void> {
+  const record = await getPhoto(id);
+  if (!record) return;
+  await savePhoto({ ...record, note });
+}
+
 export async function deletePhoto(id: string): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -141,6 +152,7 @@ const HISTORICAL_WHITELIST: (keyof HistoricalEvent)[] = [
   "enrichVersion",
   "summary",
   "importance",
+  "ruUrl",
 ];
 
 function sanitizeHistoricalEvent(raw: Record<string, unknown>): HistoricalEvent {

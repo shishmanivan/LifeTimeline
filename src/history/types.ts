@@ -13,4 +13,6 @@ export type HistoricalEvent = {
   enrichVersion: number;
   summary?: string;
   importance?: number; // 1..5, default 3
+  /** Russian Wikipedia URL (from langlinks en→ru) */
+  ruUrl?: string;
 };
