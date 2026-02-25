@@ -32,12 +32,13 @@ import {
 
 export type { Offsets };
 
-type Scale = "30d" | "90d" | "1y" | "2y" | "5y" | "10y";
+type Scale = "30d" | "60d" | "90d" | "1y" | "2y" | "5y" | "10y";
 
-const scales: Scale[] = ["30d", "90d", "1y", "2y", "5y", "10y"];
+const scales: Scale[] = ["30d", "60d", "90d", "1y", "2y", "5y", "10y"];
 
 const scaleMeta: Record<Scale, { label: string; rangeDays: number }> = {
   "30d": { label: "30 days", rangeDays: 30 },
+  "60d": { label: "60 days", rangeDays: 60 },
   "90d": { label: "90 days", rangeDays: 90 },
   "1y": { label: "1 year", rangeDays: 365 },
   "2y": { label: "2 years", rangeDays: 730 },
@@ -68,6 +69,7 @@ function getAnchorPosition(id: string): AnchorPosition {
 
 const MAX_OFFSET_DAYS: Record<Scale, number> = {
   "30d": 3,
+  "60d": 5,
   "90d": 7,
   "1y": 14,
   "2y": 30,
@@ -86,7 +88,7 @@ function formatAxisDate(d: Date, scale: Scale): string {
 }
 
 function getMinImportanceForScale(scale: Scale): number {
-  if (scale === "30d" || scale === "90d") return 3;
+  if (scale === "30d" || scale === "60d" || scale === "90d") return 3;
   if (scale === "1y") return 3;
   return 2;
 }
@@ -550,8 +552,8 @@ function App() {
     const pxPerDay = width / rangeDays;
     const axisStart = axisDates.start;
     const minImportance = getMinImportanceForScale(scale);
-    const showCompactOnly = scale === "30d" || scale === "90d";
-    const isCompactOnlyFile = (f: string) => /-2\./.test(f); // sources/*-2.tsv: only 30d/90d
+    const showCompactOnly = scale === "30d" || scale === "60d" || scale === "90d";
+    const isCompactOnlyFile = (f: string) => /[-_]2\./.test(f); // *-2.tsv or *_2.tsv: only 30d/60d/90d
 
     const filtered = historicalWithLanes.filter((e) => {
       if (isCompactOnlyFile(e.sourceFile) && !showCompactOnly) return false;

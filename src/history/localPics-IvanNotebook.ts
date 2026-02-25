@@ -1,8 +1,6 @@
 /**
  * Local image cache for historical events.
- * Lookup: manifest (date|url) -> base name from manifest, else event.date.
- * Tries extensions: .webp, .jpg, .jpeg, .png, .avif.
- * Priority: HistoryPics > IndexedDB previewBlob > Wikipedia thumbnailUrl
+ * Priority: HistoryPics (manifest) > IndexedDB previewBlob > Wikipedia thumbnailUrl
  */
 
 import manifest from "./HistoryPics/_manifest.json";
@@ -34,10 +32,7 @@ export function getLocalImageUrl(event: {
 }): string | undefined {
   const key = `${event.date}|${event.url}`;
   const filename = (manifest as Record<string, string>)[key];
-  if (filename) {
-    const base = filename.includes(".") ? filename.replace(/\.[^.]+$/, "") : filename;
-    const url = tryByBaseName(base);
-    if (url) return url;
-  }
-  return tryByBaseName(event.date);
+  if (!filename) return undefined;
+  const base = filename.includes(".") ? filename.replace(/\.[^.]+$/, "") : filename;
+  return tryByBaseName(base);
 }
