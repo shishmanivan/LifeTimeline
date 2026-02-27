@@ -15,6 +15,7 @@ import { generatePreviewBlob } from "./imagePreview";
 import { dateToX, computeLinePath } from "./timelineUtils";
 import { MarkerLink } from "./MarkerLink";
 import { getLocalImageUrl } from "./history/localPics";
+import { getMainEventIds } from "./history/mainEvents";
 import {
   PersonalLayer,
   type PersonalPhoto,
@@ -219,6 +220,7 @@ function App() {
   const [visiblePhotoIds, setVisiblePhotoIds] = useState<Set<string>>(new Set());
   const [visibleHistIds, setVisibleHistIds] = useState<Set<string>>(new Set());
   const [animatedLines, setAnimatedLines] = useState<Set<string>>(new Set());
+  const [mainEventIds, setMainEventIds] = useState<Set<string>>(new Set());
   const [linesData, setLinesData] = useState<
     { id: string; path: string; totalLength: number }[]
   >([]);
@@ -506,6 +508,14 @@ function App() {
   useEffect(() => {
     runHistoryIngest();
   }, []);
+
+  useEffect(() => {
+    if (scale === "10y") {
+      getMainEventIds().then(setMainEventIds);
+    } else {
+      setMainEventIds(new Set());
+    }
+  }, [scale]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1171,6 +1181,8 @@ function App() {
                 cardRefsMap={historicalCardRefs}
                 getLocalImageUrl={getLocalImageUrl}
                 historicalImageUrls={historicalImageUrls}
+                mainEventIds={mainEventIds}
+                isMainEffectActive={scale === "10y"}
               />
             </div>
           </>

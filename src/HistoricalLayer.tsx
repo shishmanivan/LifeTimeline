@@ -103,6 +103,8 @@ type HistoricalCardProps = {
   top: number;
   getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
   historicalImageUrls?: Record<string, string>;
+  isMainEvent?: boolean;
+  isMainEffectActive?: boolean;
 };
 
 function HistoricalCard({
@@ -111,6 +113,8 @@ function HistoricalCard({
   top,
   getLocalImageUrl,
   historicalImageUrls,
+  isMainEvent = false,
+  isMainEffectActive = false,
 }: HistoricalCardProps) {
   const imageUrl = useResolvedImageUrl(event, getLocalImageUrl, historicalImageUrls);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -132,14 +136,21 @@ function HistoricalCard({
     }
   }
 
+  const cardStyle =
+    isMainEvent
+      ? { transform: "translateX(-50%) scale(1.2)", opacity: 1 }
+      : isMainEffectActive
+        ? { transform: "translateX(-50%)", opacity: 0.45 }
+        : { transform: "translateX(-50%)" };
+
   return (
     <article
       data-event-id={event.id}
-      className={`event event-historical ${imageUrl ? "event-photo" : ""}`}
+      className={`event event-historical ${imageUrl ? "event-photo" : ""} ${isMainEvent ? "event-main" : ""}`}
       style={{
         left: `${event.xPx}px`,
         top: `${top}px`,
-        transform: "translateX(-50%)",
+        ...cardStyle,
       }}
     >
       <div
@@ -180,6 +191,9 @@ type HistoricalLayerProps = {
   insideZone?: boolean;
   getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
   historicalImageUrls?: Record<string, string>;
+  /** At 10y scale: main events are emphasized, others dimmed. Main drawn on top. */
+  mainEventIds?: Set<string>;
+  isMainEffectActive?: boolean;
 };
 
 export function HistoricalLayer({
@@ -189,14 +203,25 @@ export function HistoricalLayer({
   insideZone = true,
   getLocalImageUrl,
   historicalImageUrls,
+  mainEventIds,
+  isMainEffectActive = false,
 }: HistoricalLayerProps) {
+  const sortedEvents = isMainEffectActive && mainEventIds
+    ? [...events].sort((a, b) => {
+        const aMain = mainEventIds.has(a.id) ? 1 : 0;
+        const bMain = mainEventIds.has(b.id) ? 1 : 0;
+        return aMain - bMain;
+      })
+    : events;
+
   return (
     <>
-      {events.map((event) => {
+      {sortedEvents.map((event) => {
         const top =
           insideZone && event.topRelativeToZone != null
             ? event.topRelativeToZone
             : event.yTop - HIST_ARTICLE_OFFSET;
+        const isMain = isMainEffectActive && mainEventIds?.has(event.id) === true;
 
         return (
           <HistoricalCard
@@ -206,6 +231,8 @@ export function HistoricalLayer({
             top={top}
             getLocalImageUrl={getLocalImageUrl}
             historicalImageUrls={historicalImageUrls}
+            isMainEvent={isMain}
+            isMainEffectActive={isMainEffectActive}
           />
         );
       })}
