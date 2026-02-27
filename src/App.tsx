@@ -227,6 +227,7 @@ function App() {
   const visibleHistIdsRef = useRef<Set<string>>(new Set());
   const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleScrollStopRef = useRef<() => void>(() => {});
+  const thumbnailUrlCacheRef = useRef<Map<string, string>>(new Map());
   const scale = scales[scaleIndex];
 
   const getActiveOffsets = (id: string): Offsets => {
@@ -297,17 +298,60 @@ function App() {
 
   useEffect(() => {
     const urls: Record<string, string> = {};
+    const createdBlobUrls: string[] = [];
     historicalEvents.forEach((e) => {
       if (e.previewBlob) {
-        urls[e.id] = URL.createObjectURL(e.previewBlob);
+        const url = URL.createObjectURL(e.previewBlob);
+        urls[e.id] = url;
+        createdBlobUrls.push(url);
+      } else if (e.thumbnailUrl) {
+        const cached = thumbnailUrlCacheRef.current.get(e.id);
+        if (cached) {
+          urls[e.id] = cached;
+        }
       }
     });
     setHistoricalImageUrls((prev) => {
-      Object.values(prev).forEach((u) => URL.revokeObjectURL(u));
+      Object.entries(prev).forEach(([id, u]) => {
+        const stillNeeded = id in urls && urls[id] === u;
+        const isCached = thumbnailUrlCacheRef.current.get(id) === u;
+        if (!stillNeeded && !isCached) {
+          URL.revokeObjectURL(u);
+        }
+      });
       return urls;
     });
     return () => {
-      Object.values(urls).forEach((u) => URL.revokeObjectURL(u));
+      createdBlobUrls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [historicalEvents]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const toFetch = historicalEvents.filter(
+      (e) =>
+        e.thumbnailUrl &&
+        !e.previewBlob &&
+        !thumbnailUrlCacheRef.current.has(e.id)
+    );
+    toFetch.forEach(async (e) => {
+      if (cancelled) return;
+      try {
+        const res = await fetch(e.thumbnailUrl!, { mode: "cors" });
+        if (!res.ok || cancelled) return;
+        const blob = await res.blob();
+        if (cancelled) return;
+        const blobUrl = URL.createObjectURL(blob);
+        thumbnailUrlCacheRef.current.set(e.id, blobUrl);
+        setHistoricalImageUrls((prev) =>
+          prev[e.id] ? prev : { ...prev, [e.id]: blobUrl }
+        );
+      } catch {
+        /* ignore */
+      }
+    });
+    return () => {
+      cancelled = true;
     };
   }, [historicalEvents]);
 
@@ -319,6 +363,8 @@ function App() {
     return () => {
       objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       objectUrlsRef.current.clear();
+      thumbnailUrlCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
+      thumbnailUrlCacheRef.current.clear();
     };
   }, []);
 
