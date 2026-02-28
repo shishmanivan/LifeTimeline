@@ -24,7 +24,6 @@ import {
 } from "./PersonalLayer";
 import {
   HistoricalLayer,
-  assignHistoricalLanes,
   AXIS_GAP,
   HIST_ARTICLE_OFFSET,
   HIST_LANE_HEIGHT,
@@ -222,7 +221,10 @@ function App() {
   const [animatedLines, setAnimatedLines] = useState<Set<string>>(new Set());
   const [mainEventIds, setMainEventIds] = useState<Set<string>>(new Set());
   const [linesData, setLinesData] = useState<
-    { id: string; path: string; totalLength: number }[]
+    { id: string; path: string; totalLength: number; lineVariant?: string }[]
+  >([]);
+  const [mainMarkersData, setMainMarkersData] = useState<
+    { id: string; xPx: number; yAxis: number; yCardTop: number; scale: "10y" | "5y" | "small" }[]
   >([]);
   const seenInViewportRef = useRef<Set<string>>(new Set());
   const visiblePhotoIdsRef = useRef<Set<string>>(new Set());
@@ -510,12 +512,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (scale === "10y") {
-      getMainEventIds().then(setMainEventIds);
-    } else {
-      setMainEventIds(new Set());
-    }
-  }, [scale]);
+    getMainEventIds().then(setMainEventIds);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -594,13 +592,12 @@ function App() {
     pendingOffsets,
   ]);
 
+  /** Use stored laneIndex — never recalculate (assigned at ingest) */
   const historicalWithLanes = useMemo(() => {
-    if (import.meta.env.DEV) {
-      console.debug("[layout] historicalWithLanes recompute", {
-        eventCount: historicalEvents.length,
-      });
-    }
-    return assignHistoricalLanes(historicalEvents);
+    return historicalEvents.map((e) => ({
+      ...e,
+      laneIndex: e.laneIndex ?? 0,
+    }));
   }, [historicalEvents]);
 
   const positionedHistorical = useMemo((): PositionedHistorical[] => {
@@ -744,7 +741,7 @@ function App() {
     const axisRect = axis!.getBoundingClientRect();
     const axisYActual = axisRect.top - tlRect.top + axisRect.height / 2;
 
-    const lines: { id: string; path: string; totalLength: number }[] = [];
+    const lines: { id: string; path: string; totalLength: number; lineVariant?: "normal" | "dim-10y" | "dim-5y" }[] = [];
 
     const rangeDays = scaleMeta[scale].rangeDays;
     const pxPerDay = width / rangeDays;
@@ -775,8 +772,10 @@ function App() {
         axisYActual,
         true
       );
-      lines.push({ id: photo.id, path, totalLength });
+      lines.push({ id: photo.id, path, totalLength, lineVariant: "normal" });
     }
+
+    const mainMarkers: { id: string; xPx: number; yAxis: number; yCardTop: number; scale: "10y" | "5y" | "small" }[] = [];
 
     for (const ev of positionedHistorical) {
       if (!visibleHistIds.has(ev.id)) continue;
@@ -785,23 +784,46 @@ function App() {
 
       const cardRect = card.getBoundingClientRect();
       const cardLeft = cardRect.left - tlRect.left;
+      const cardTop = cardRect.top - tlRect.top;
       const cardWidth = cardRect.width;
       const pos = getAnchorPosition(ev.id);
       const anchorPct = pos === "left" ? 0 : pos === "center" ? 0.5 : 1;
       const anchorX = cardLeft + cardWidth * anchorPct;
       const xEvent = xEventForDate(ev.date);
 
+      const isMain = mainEventIds.has(ev.id);
+
+      if (isMain) {
+        const markerScale =
+          scale === "10y" ? "10y" : scale === "5y" ? "5y" : "small";
+        mainMarkers.push({
+          id: ev.id,
+          xPx: xEvent,
+          yAxis: axisYActual,
+          yCardTop: cardTop,
+          scale: markerScale,
+        });
+        continue;
+      }
+
       const { path, totalLength } = computeLinePath(
         anchorX,
-        ev.yTop,
+        cardTop,
         xEvent,
         axisYActual,
         false
       );
-      lines.push({ id: ev.id, path, totalLength });
+      const lineVariant =
+        scale === "10y"
+          ? "dim-10y"
+          : scale === "5y"
+            ? "dim-5y"
+            : "normal";
+      lines.push({ id: ev.id, path, totalLength, lineVariant });
     }
 
     setLinesData(lines);
+    setMainMarkersData(mainMarkers);
   }, [
     positionedPersonal,
     positionedHistorical,
@@ -812,6 +834,7 @@ function App() {
     axisDates,
     pendingOffsets,
     cardDragging,
+    mainEventIds,
   ]);
 
   const resetLineAnimation = (id: string) => {
@@ -1144,9 +1167,38 @@ function App() {
               path={line.path}
               totalLength={line.totalLength}
               animate={animatedLines.has(line.id)}
+              lineVariant={line.lineVariant as "normal" | "dim-10y" | "dim-5y" | undefined}
             />
           ))}
         </svg>
+
+        {mainMarkersData.length > 0 && (
+          <svg className="main-markers-overlay" aria-hidden>
+            {mainMarkersData.map((m) => (
+              <g key={m.id}>
+                <line
+                  x1={m.xPx}
+                  y1={m.yCardTop}
+                  x2={m.xPx}
+                  y2={m.yAxis}
+                  className={`main-marker-line main-marker-line-${m.scale}`}
+                />
+                <circle
+                  cx={m.xPx}
+                  cy={m.yCardTop}
+                  r={m.scale === "10y" ? 4 : 3}
+                  className="main-marker-dot"
+                />
+                <circle
+                  cx={m.xPx}
+                  cy={m.yAxis}
+                  r={m.scale === "10y" ? 4 : 3}
+                  className="main-marker-dot"
+                />
+              </g>
+            ))}
+          </svg>
+        )}
 
         {layoutInfo && (
           <>
@@ -1182,7 +1234,11 @@ function App() {
                 getLocalImageUrl={getLocalImageUrl}
                 historicalImageUrls={historicalImageUrls}
                 mainEventIds={mainEventIds}
-                isMainEffectActive={scale === "10y"}
+                mainEffectMode={
+                  scale === "10y" ? "10y" : "5y"
+                }
+                dimNonMain={scale === "10y" || scale === "5y"}
+                openEventId={selectedHistoricalEvent?.id ?? null}
               />
             </div>
           </>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { HistoricalEvent } from "./history/types";
+import { MAX_LANES, CANONICAL_WIDTH_DAYS } from "./history/laneAssignment";
 
 /** Resolve image URL: HistoryPics > cached > previewBlob > thumbnailUrl */
 export function useResolvedImageUrl(
@@ -39,63 +40,22 @@ export const AXIS_GAP = 20;
 export const HIST_LANE_HEIGHT = 195;
 /** Margin above card: article.top = yTop - this so card top = yTop */
 export const HIST_ARTICLE_OFFSET = 8;
-const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
-/** Stable lane assignment: independent of zoom/pxPerDay */
-export const MAX_LANES = 3;
-export const CANONICAL_WIDTH_DAYS = 12;
+export { MAX_LANES, CANONICAL_WIDTH_DAYS };
 
 /** Fixed height of zone below axis for historical events */
 export const HIST_ZONE_HEIGHT =
   AXIS_GAP + MAX_LANES * HIST_LANE_HEIGHT + 20;
 
-function djb2Hash(str: string): number {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) {
-    h = ((h << 5) + h + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-}
+/** Top (relative to zone) for central lane — main events align here at 10y/5y */
+export const MAIN_CENTRAL_TOP_REL =
+  AXIS_GAP + HIST_LANE_HEIGHT - HIST_ARTICLE_OFFSET;
+/** Offset main axis up (px) — for fine-tuning */
+const MAIN_AXIS_OFFSET_UP = 50;
+/** Height of main corridor layer — slightly more than scaled main cards */
+const MAIN_CORRIDOR_HEIGHT = 250;
 
-/**
- * Stable lane assignment. Depends ONLY on events (id, date), CANONICAL_WIDTH_DAYS, MAX_LANES.
- * Try lanes 0..MAX_LANES-2 with collision check; if none fit, overflow to lane MAX_LANES-1.
- * laneIndex is always < MAX_LANES.
- */
-export function assignHistoricalLanes(
-  events: HistoricalEvent[]
-): (HistoricalEvent & { laneIndex: number })[] {
-  const sorted = [...events].sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
-  const halfW = CANONICAL_WIDTH_DAYS / 2;
-  const halfWMs = halfW * MS_IN_DAY;
-  const overflowLane = MAX_LANES - 1;
-  const collidableLanes = MAX_LANES - 1;
-  /** Per-lane: array of {start, end} for placed intervals (lanes 0..overflowLane-1) */
-  const laneIntervals: { start: number; end: number }[][] = [];
-
-  return sorted.map((ev) => {
-    const evMs = new Date(ev.date).getTime();
-    const rangeStart = evMs - halfWMs;
-    const rangeEnd = evMs + halfWMs;
-    const baseLane = djb2Hash(ev.id) % collidableLanes;
-
-    for (let offset = 0; offset < collidableLanes; offset++) {
-      const laneIdx = (baseLane + offset) % collidableLanes;
-      const intervals = laneIntervals[laneIdx] ?? [];
-      const overlaps = intervals.some(
-        (iv) => rangeStart < iv.end && iv.start < rangeEnd
-      );
-      if (!overlaps) {
-        if (!laneIntervals[laneIdx]) laneIntervals[laneIdx] = [];
-        laneIntervals[laneIdx].push({ start: rangeStart, end: rangeEnd });
-        return { ...ev, laneIndex: laneIdx };
-      }
-    }
-    return { ...ev, laneIndex: overflowLane };
-  });
-}
+type MainEffectMode = "10y" | "5y" | "small" | "none";
 
 type HistoricalCardProps = {
   event: PositionedHistorical;
@@ -104,7 +64,9 @@ type HistoricalCardProps = {
   getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
   historicalImageUrls?: Record<string, string>;
   isMainEvent?: boolean;
-  isMainEffectActive?: boolean;
+  mainEffectMode?: MainEffectMode;
+  dimNonMain?: boolean;
+  isOpen?: boolean;
 };
 
 function HistoricalCard({
@@ -114,7 +76,9 @@ function HistoricalCard({
   getLocalImageUrl,
   historicalImageUrls,
   isMainEvent = false,
-  isMainEffectActive = false,
+  mainEffectMode = "none",
+  dimNonMain = true,
+  isOpen = false,
 }: HistoricalCardProps) {
   const imageUrl = useResolvedImageUrl(event, getLocalImageUrl, historicalImageUrls);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -136,20 +100,45 @@ function HistoricalCard({
     }
   }
 
+  const mainScale =
+    mainEffectMode === "10y"
+      ? 1.25
+      : mainEffectMode === "5y"
+        ? 1.13
+        : mainEffectMode === "small"
+          ? 1.08
+          : 1;
   const cardStyle =
-    isMainEvent
-      ? { transform: "translateX(-50%) scale(1.2)", opacity: 1 }
-      : isMainEffectActive
-        ? { transform: "translateX(-50%)", opacity: 0.45 }
-        : { transform: "translateX(-50%)" };
+    isMainEvent && mainEffectMode !== "none"
+      ? { transform: `translateX(-50%) scale(${mainScale})` }
+      : { transform: "translateX(-50%)" };
+
+  const dimClass =
+    dimNonMain && !isMainEvent && mainEffectMode === "10y"
+      ? "hist--dim-10y"
+      : dimNonMain && !isMainEvent && mainEffectMode === "5y"
+        ? "hist--dim-5y"
+        : "";
+  const mainClass = isMainEvent && mainEffectMode !== "none" ? "hist--main" : "";
+  const mainModeClass =
+    isMainEvent && mainEffectMode === "10y"
+      ? "hist-main-10y"
+      : isMainEvent && mainEffectMode === "5y"
+        ? "hist-main-5y"
+        : "";
+  const openMainClass =
+    isMainEvent && isOpen && (mainEffectMode === "10y" || mainEffectMode === "5y")
+      ? "hist--main-open"
+      : "";
 
   return (
     <article
       data-event-id={event.id}
-      className={`event event-historical ${imageUrl ? "event-photo" : ""} ${isMainEvent ? "event-main" : ""}`}
+      className={`event event-historical ${imageUrl ? "event-photo" : ""} ${mainClass} ${mainModeClass} ${openMainClass} ${dimClass}`.trim()}
       style={{
         left: `${event.xPx}px`,
         top: `${top}px`,
+        zIndex: isMainEvent && mainEffectMode !== "none" ? 2 : undefined,
         ...cardStyle,
       }}
     >
@@ -191,9 +180,13 @@ type HistoricalLayerProps = {
   insideZone?: boolean;
   getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
   historicalImageUrls?: Record<string, string>;
-  /** At 10y scale: main events are emphasized, others dimmed. Main drawn on top. */
+  /** At 10y/5y scale: main events emphasized, others dimmed. Main drawn on top. */
   mainEventIds?: Set<string>;
-  isMainEffectActive?: boolean;
+  mainEffectMode?: MainEffectMode;
+  /** When false (2y and below): non-main keep color, no dimming */
+  dimNonMain?: boolean;
+  /** ID of open (modal) event — for main card accent */
+  openEventId?: string | null;
 };
 
 export function HistoricalLayer({
@@ -204,24 +197,51 @@ export function HistoricalLayer({
   getLocalImageUrl,
   historicalImageUrls,
   mainEventIds,
-  isMainEffectActive = false,
+  mainEffectMode = "none",
+  dimNonMain = true,
+  openEventId = null,
 }: HistoricalLayerProps) {
-  const sortedEvents = isMainEffectActive && mainEventIds
-    ? [...events].sort((a, b) => {
-        const aMain = mainEventIds.has(a.id) ? 1 : 0;
-        const bMain = mainEventIds.has(b.id) ? 1 : 0;
-        return aMain - bMain;
-      })
-    : events;
+  const isEffectActive = mainEffectMode !== "none";
+  const sortedEvents =
+    isEffectActive && mainEventIds
+      ? [...events].sort((a, b) => {
+          const aMain = mainEventIds.has(a.id) ? 1 : 0;
+          const bMain = mainEventIds.has(b.id) ? 1 : 0;
+          return aMain - bMain;
+        })
+      : events;
+
+  const showMainCorridor =
+    (mainEffectMode === "10y" || mainEffectMode === "5y") &&
+    mainEventIds &&
+    mainEventIds.size > 0;
 
   return (
     <>
+      {showMainCorridor && (
+        <div
+          className={`main-corridor ${mainEffectMode === "10y" ? "main-corridor-10y" : "main-corridor-5y"}`}
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: MAIN_CENTRAL_TOP_REL - MAIN_AXIS_OFFSET_UP,
+            height: MAIN_CORRIDOR_HEIGHT,
+            zIndex: 0,
+            pointerEvents: "none",
+          }}
+          aria-hidden
+        />
+      )}
       {sortedEvents.map((event) => {
+        const isMain = isEffectActive && mainEventIds?.has(event.id) === true;
+        /** Main at 10y/5y: fixed central axis. Others: normal lane position. */
         const top =
           insideZone && event.topRelativeToZone != null
-            ? event.topRelativeToZone
+            ? isMain && (mainEffectMode === "10y" || mainEffectMode === "5y")
+              ? MAIN_CENTRAL_TOP_REL - MAIN_AXIS_OFFSET_UP
+              : event.topRelativeToZone
             : event.yTop - HIST_ARTICLE_OFFSET;
-        const isMain = isMainEffectActive && mainEventIds?.has(event.id) === true;
 
         return (
           <HistoricalCard
@@ -232,7 +252,9 @@ export function HistoricalLayer({
             getLocalImageUrl={getLocalImageUrl}
             historicalImageUrls={historicalImageUrls}
             isMainEvent={isMain}
-            isMainEffectActive={isMainEffectActive}
+            mainEffectMode={mainEffectMode}
+            dimNonMain={dimNonMain}
+            isOpen={openEventId === event.id}
           />
         );
       })}

@@ -4,6 +4,7 @@ import {
   getAllHistoricalEvents,
   getHistoricalEvent,
 } from "../db";
+import { assignHistoricalLanes } from "./laneAssignment";
 import manifest from "./HistoryPics/_manifest.json";
 import { generatePreviewBlob } from "../imagePreview";
 import type { HistoricalEvent } from "./types";
@@ -298,6 +299,16 @@ async function runHistoryIngestInternal(): Promise<void> {
       console.log(
         `[history] Ingested ${fileName}: ${toUpsert.length} events, errors: ${errors}`
       );
+    }
+  }
+
+  // Assign lanes once for ALL events and persist — never recalculate at display time
+  const allEvents = await getAllHistoricalEvents();
+  if (allEvents.length > 0) {
+    const withLanes = assignHistoricalLanes(allEvents);
+    await bulkUpsertHistoricalEvents(withLanes);
+    if (import.meta.env.DEV) {
+      console.log(`[history] Assigned laneIndex to ${withLanes.length} events`);
     }
   }
 

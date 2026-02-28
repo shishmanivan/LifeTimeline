@@ -1,7 +1,8 @@
 import type { HistoricalEvent } from "./history/types";
+import { assignHistoricalLanes } from "./history/laneAssignment";
 
 const DB_NAME = "LifeTimelineDB";
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 const STORE_NAME = "photos";
 const HISTORICAL_STORE = "historicalEvents";
 
@@ -33,8 +34,12 @@ function openDB(): Promise<IDBDatabase> {
         const store = db.createObjectStore(HISTORICAL_STORE, { keyPath: "id" });
         store.createIndex("date", "date");
       }
-      if ((ev.newVersion ?? db.version) === 6 && ev.target.transaction) {
-        migrateHistoricalStripLegacyOffsets(ev.target.transaction);
+      const tx = ev.target.transaction;
+      if ((ev.newVersion ?? db.version) === 6 && tx) {
+        migrateHistoricalStripLegacyOffsets(tx);
+      }
+      if ((ev.newVersion ?? db.version) === 7 && tx) {
+        migrateHistoricalLaneIndex(tx);
       }
     };
   });
@@ -153,6 +158,7 @@ const HISTORICAL_WHITELIST: (keyof HistoricalEvent)[] = [
   "summary",
   "importance",
   "ruUrl",
+  "laneIndex",
 ];
 
 function sanitizeHistoricalEvent(raw: Record<string, unknown>): HistoricalEvent {
@@ -201,6 +207,22 @@ function migrateHistoricalStripLegacyOffsets(tx: IDBTransaction): void {
       console.log(
         `[history] cleaned ${cleaned} records with legacy offsets`
       );
+    }
+  };
+}
+
+function migrateHistoricalLaneIndex(tx: IDBTransaction): void {
+  const store = tx.objectStore(HISTORICAL_STORE);
+  const req = store.getAll();
+  req.onsuccess = () => {
+    const raw = (req.result || []) as HistoricalEvent[];
+    if (raw.length === 0) return;
+    const withLanes = assignHistoricalLanes(raw);
+    for (const ev of withLanes) {
+      store.put(ev);
+    }
+    if (import.meta.env.DEV) {
+      console.log(`[history] assigned laneIndex to ${withLanes.length} events`);
     }
   };
 }

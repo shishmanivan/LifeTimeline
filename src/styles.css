@@ -391,6 +391,41 @@ body {
   stroke-width: 1;
 }
 
+.timeline-line-path.line-dim-10y {
+  stroke: rgba(0, 0, 0, 0.12);
+  stroke-width: 1;
+}
+
+.timeline-line-path.line-dim-5y {
+  stroke: rgba(0, 0, 0, 0.16);
+  stroke-width: 1;
+}
+
+/* Main markers overlay: vertical lines + dots at card and axis (all scales) */
+.main-markers-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.main-markers-overlay .main-marker-line {
+  fill: none;
+  stroke: #2a2a2a;
+  stroke-width: 2.75;
+}
+
+.main-markers-overlay .main-marker-line-5y,
+.main-markers-overlay .main-marker-line-small {
+  stroke-width: 2;
+}
+
+.main-markers-overlay .main-marker-dot {
+  fill: #2a2a2a;
+}
+
 .timeline-line-path.line-animate {
   animation: line-draw 1s ease-out forwards;
 }
@@ -446,6 +481,59 @@ body {
   height: auto;
   padding: 4px 6px 4px;
   margin: 0;
+}
+
+/* Main corridor — horizontal layer for main events (10y, 5y) */
+.main-corridor-10y {
+  background: #f5f5f5;
+}
+.main-corridor-5y {
+  background: #f8f8f8;
+}
+
+/* History hierarchy: main vs non-main by scale (10y, 5y). Filters on image only. */
+.event-historical.hist--main .card {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  border-color: #333;
+}
+.event-historical.hist-main-10y .card {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+}
+.event-historical.hist-main-10y .cardTitle {
+  font-weight: 600;
+  font-size: 13px;
+}
+.event-historical.hist-main-5y .card {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+.event-historical.hist-main-5y .cardTitle {
+  font-weight: 600;
+}
+.event-historical.hist--main-open .card {
+  border-top-width: 2px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12);
+}
+.event-historical.hist--dim-10y .card {
+  box-shadow: none;
+  border-color: #e0e0e0;
+}
+.event-historical.hist--dim-10y .cardImage-historical img {
+  filter: grayscale(100%) contrast(0.85) saturate(0.08);
+}
+.event-historical.hist--dim-10y .cardTitle {
+  color: #999;
+}
+.event-historical.hist--dim-5y .card {
+  box-shadow: none;
+  border-color: #ddd;
+}
+.event-historical.hist--dim-5y .cardImage-historical img {
+  filter: grayscale(80%) saturate(0.18) contrast(0.9);
+}
+.event-historical.hist--dim-5y .cardTitle {
+  color: #777;
 }
 
 /* Historical event modal (lightbox) */

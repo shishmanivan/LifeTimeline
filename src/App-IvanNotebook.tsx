@@ -21,7 +21,6 @@ import {
 } from "./PersonalLayer";
 import {
   HistoricalLayer,
-  assignHistoricalLanes,
   AXIS_GAP,
   HIST_ARTICLE_OFFSET,
   HIST_LANE_HEIGHT,
@@ -529,13 +528,12 @@ function App() {
     pendingOffsets,
   ]);
 
+  /** Use stored laneIndex — never recalculate (assigned at ingest) */
   const historicalWithLanes = useMemo(() => {
-    if (import.meta.env.DEV) {
-      console.debug("[layout] historicalWithLanes recompute", {
-        eventCount: historicalEvents.length,
-      });
-    }
-    return assignHistoricalLanes(historicalEvents);
+    return historicalEvents.map((e) => ({
+      ...e,
+      laneIndex: e.laneIndex ?? 0,
+    }));
   }, [historicalEvents]);
 
   const positionedHistorical = useMemo((): PositionedHistorical[] => {

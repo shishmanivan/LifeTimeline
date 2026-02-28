@@ -15,4 +15,6 @@ export type HistoricalEvent = {
   importance?: number; // 1..5, default 3
   /** Russian Wikipedia URL (from langlinks en→ru) */
   ruUrl?: string;
+  /** Lane index (0..2), assigned at ingest, never recalculated */
+  laneIndex?: number;
 };
