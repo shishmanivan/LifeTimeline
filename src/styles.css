@@ -483,12 +483,10 @@ body {
   margin: 0;
 }
 
-/* Main corridor — horizontal layer for main events (10y, 5y) */
-.main-corridor-10y {
-  background: #f5f5f5;
-}
+/* Main corridor — horizontal layer for main events (10y, 5y). Transparent so lines remain visible. */
+.main-corridor-10y,
 .main-corridor-5y {
-  background: #f8f8f8;
+  background: transparent;
 }
 
 /* History hierarchy: main vs non-main by scale (10y, 5y). Filters on image only. */

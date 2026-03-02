@@ -46,22 +46,25 @@ export function assignHistoricalLanes(
       if (!overlaps) freeLanes.push(laneIdx);
     }
 
-    const laneIdx =
-      freeLanes.length > 1
-        ? freeLanes.reduce((a, b) =>
-            (laneIntervals[a]?.length ?? 0) <= (laneIntervals[b]?.length ?? 0)
-              ? a
-              : b
-          )
-        : freeLanes[0] ?? 1;
-
-    if (freeLanes.length > 0) {
-      if (!laneIntervals[laneIdx]) laneIntervals[laneIdx] = [];
-      laneIntervals[laneIdx].push({ start: rangeStart, end: rangeEnd });
-      result.push({ ...ev, laneIndex: laneIdx });
+    let laneIdx: number;
+    if (freeLanes.length > 1) {
+      laneIdx = freeLanes.reduce((a, b) =>
+        (laneIntervals[a]?.length ?? 0) <= (laneIntervals[b]?.length ?? 0)
+          ? a
+          : b
+      );
+    } else if (freeLanes.length === 1) {
+      laneIdx = freeLanes[0];
     } else {
-      result.push({ ...ev, laneIndex: 1 });
+      laneIdx =
+        (laneIntervals[0]?.length ?? 0) <= (laneIntervals[1]?.length ?? 0)
+          ? 0
+          : 1;
     }
+
+    if (!laneIntervals[laneIdx]) laneIntervals[laneIdx] = [];
+    laneIntervals[laneIdx].push({ start: rangeStart, end: rangeEnd });
+    result.push({ ...ev, laneIndex: laneIdx });
   }
 
   return result;
