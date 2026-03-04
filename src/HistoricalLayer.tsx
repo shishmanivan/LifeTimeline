@@ -31,7 +31,12 @@ export type PositionedHistorical = HistoricalEvent & {
   yTop: number;
   /** Top of article relative to zone (zone starts at axisY) */
   topRelativeToZone?: number;
+  /** When 3+ events on same day, covered card gets +25px */
+  overlapOffsetY?: number;
 };
+
+/** Offset for card covered by others when 3 events on same day */
+export const OVERLAP_OFFSET_PX = 25;
 
 export const HIST_CARD_WIDTH_PX = 120;
 export const HIST_CARD_GAP_PX = 8;
@@ -56,6 +61,21 @@ const MAIN_AXIS_OFFSET_UP = 50;
 const MAIN_CORRIDOR_HEIGHT = 250;
 
 type MainEffectMode = "10y" | "5y" | "small" | "none";
+
+/** Deterministic micro-offset for non-main: removes "books on shelf" effect. No random(). */
+function getMicroOffset(eventId: string, mode: "10y" | "5y"): number {
+  let h = 0;
+  for (let i = 0; i < eventId.length; i++) {
+    h = ((h << 5) - h + eventId.charCodeAt(i)) | 0;
+  }
+  const abs = Math.abs(h);
+  if (mode === "10y") {
+    const r = abs % 3;
+    return r === 0 ? 0 : r === 1 ? 5 : -5;
+  }
+  const r = abs % 4;
+  return r === 0 || r === 3 ? 0 : r === 1 ? 3 : -3;
+}
 
 type HistoricalCardProps = {
   event: PositionedHistorical;
@@ -131,13 +151,19 @@ function HistoricalCard({
       ? "hist--main-open"
       : "";
 
+  const microOffset =
+    !isMainEvent && (mainEffectMode === "10y" || mainEffectMode === "5y")
+      ? getMicroOffset(event.id, mainEffectMode)
+      : 0;
+  const topWithOffset = top + microOffset;
+
   return (
     <article
       data-event-id={event.id}
       className={`event event-historical ${imageUrl ? "event-photo" : ""} ${mainClass} ${mainModeClass} ${openMainClass} ${dimClass}`.trim()}
       style={{
         left: `${event.xPx}px`,
-        top: `${top}px`,
+        top: `${topWithOffset}px`,
         zIndex: isMainEvent && mainEffectMode !== "none" ? 2 : undefined,
         ...cardStyle,
       }}
@@ -236,12 +262,13 @@ export function HistoricalLayer({
       {sortedEvents.map((event) => {
         const isMain = isEffectActive && mainEventIds?.has(event.id) === true;
         /** Main at 10y/5y: fixed central axis. Others: normal lane position. */
-        const top =
+        const baseTop =
           insideZone && event.topRelativeToZone != null
             ? isMain && (mainEffectMode === "10y" || mainEffectMode === "5y")
               ? MAIN_CENTRAL_TOP_REL - MAIN_AXIS_OFFSET_UP
               : event.topRelativeToZone
             : event.yTop - HIST_ARTICLE_OFFSET;
+        const top = baseTop + (event.overlapOffsetY ?? 0);
 
         return (
           <HistoricalCard

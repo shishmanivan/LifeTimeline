@@ -624,7 +624,7 @@ function App() {
     const xMin = -overscanPx;
     const xMax = width + overscanPx;
 
-    return filtered
+    const withPos = filtered
       .map((e) => {
         const xPx = dateToX(e.date, axisStart, pxPerDay);
         const laneIdx = Math.min(e.laneIndex, MAX_LANES - 1);
@@ -641,6 +641,33 @@ function App() {
         };
       })
       .filter((e) => e.xPx >= xMin && e.xPx <= xMax);
+
+    const OVERLAP_OFFSET_PX = 25;
+    const byDate = new Map<string, (typeof withPos)[number][]>();
+    for (const ev of withPos) {
+      const list = byDate.get(ev.date) ?? [];
+      list.push(ev);
+      byDate.set(ev.date, list);
+    }
+    const overlapIds = new Set<string>();
+    for (const list of byDate.values()) {
+      if (list.length < 3) continue;
+      const byLane = new Map<number, (typeof list)[number][]>();
+      for (const ev of list) {
+        const laneList = byLane.get(ev.laneIndex) ?? [];
+        laneList.push(ev);
+        byLane.set(ev.laneIndex, laneList);
+      }
+      for (const laneList of byLane.values()) {
+        if (laneList.length < 2) continue;
+        const sorted = [...laneList].sort((a, b) => a.id.localeCompare(b.id));
+        overlapIds.add(sorted[0].id);
+      }
+    }
+
+    return withPos.map((e) =>
+      overlapIds.has(e.id) ? { ...e, overlapOffsetY: OVERLAP_OFFSET_PX } : e
+    );
   }, [
     historicalWithLanes,
     layoutInfo,

@@ -30,7 +30,14 @@ export type ParsedRow = {
   title: string;
   lang: string;
   sourceLine: number;
+  /** New format: en_url for ID, ru_url for display */
+  ruUrl?: string;
 };
+
+/** New format: date, en_url, image, en_title, ru_title, ru_url */
+function isNewFormat(headers: string[]): boolean {
+  return headers.includes("en_url");
+}
 
 export function parseTsv(
   raw: string,
@@ -49,12 +56,18 @@ export function parseTsv(
   };
   const dateIdx = idx("date");
   const urlIdx = idx("url");
+  const enUrlIdx = idx("en_url");
   const imageIdx = idx("image");
   const titleIdx = idx("title");
+  const enTitleIdx = idx("en_title");
+  const ruTitleIdx = idx("ru_title");
+  const ruUrlIdx = idx("ru_url");
   const langIdx = idx("lang");
 
-  if (dateIdx < 0 || urlIdx < 0) {
-    console.warn(`[history] ${fileName}: missing required columns date, url`);
+  const newFmt = isNewFormat(headers);
+  const hasUrl = urlIdx >= 0 || (newFmt && enUrlIdx >= 0);
+  if (dateIdx < 0 || !hasUrl) {
+    console.warn(`[history] ${fileName}: missing required columns date, url/en_url`);
     return { rows: [], errors: 1 };
   }
 
@@ -69,10 +82,24 @@ export function parseTsv(
     const get = (col: number) => (col >= 0 && col < cells.length ? cells[col].trim() : "");
 
     const date = get(dateIdx);
-    const url = get(urlIdx);
+    let url: string;
+    let title: string;
+    let lang: string;
+    let ruUrl: string | undefined;
+
+    if (newFmt) {
+      url = get(enUrlIdx);
+      ruUrl = ruUrlIdx >= 0 ? get(ruUrlIdx) : undefined;
+      title = ruTitleIdx >= 0 ? get(ruTitleIdx) : get(enTitleIdx);
+      lang = "ru";
+    } else {
+      url = get(urlIdx);
+      title = titleIdx >= 0 ? get(titleIdx) : "";
+      lang = langIdx >= 0 ? get(langIdx) : "en";
+      ruUrl = ruUrlIdx >= 0 ? get(ruUrlIdx) : undefined;
+    }
+
     const image = imageIdx >= 0 ? get(imageIdx) : "";
-    const title = titleIdx >= 0 ? get(titleIdx) : "";
-    const lang = langIdx >= 0 ? get(langIdx) : "en";
 
     if (!DATE_REGEX.test(date)) {
       console.warn(`[history] ${fileName}:${i + 1}: invalid date (expected YYYY-MM-DD): ${date}`);
@@ -80,12 +107,12 @@ export function parseTsv(
       continue;
     }
     if (!url.startsWith("http")) {
-      console.warn(`[history] ${fileName}:${i + 1}: url must start with http: ${url}`);
+      console.warn(`[history] ${fileName}:${i + 1}: url/en_url must start with http: ${url}`);
       errors++;
       continue;
     }
 
-    rows.push({ date, url, image, title, lang, sourceLine: i + 1 });
+    rows.push({ date, url, image, title, lang, sourceLine: i + 1, ruUrl });
   }
   return { rows, errors };
 }
@@ -164,7 +191,8 @@ function needsEnrich(existing: HistoricalEvent | null, row: ParsedRow): boolean 
   const titleMatch = (row.title.trim() || existing.title) === existing.title;
   const langMatch = existing.lang === row.lang;
   const imageMatch = !row.image.trim() || existing.thumbnailUrl === row.image.trim();
-  return !titleMatch || !langMatch || !imageMatch;
+  const urlMatch = (row.ruUrl || row.url) === existing.url;
+  return !titleMatch || !langMatch || !imageMatch || !urlMatch;
 }
 
 const ingestLock = { running: false, promise: null as Promise<void> | null };
@@ -195,8 +223,19 @@ async function runHistoryIngestInternal(): Promise<void> {
   let totalErrors = 0;
   const allFromDb = await getAllHistoricalEvents();
 
+  const mainSourcedIds = allFromDb
+    .filter((e) => e.sourceFile === "Main.tsv")
+    .map((e) => e.id);
+  if (mainSourcedIds.length > 0) {
+    await deleteHistoricalEventsByIds(mainSourcedIds);
+    if (import.meta.env.DEV) {
+      console.log(`[history] Removed ${mainSourcedIds.length} events from Main.tsv (data only from year files)`);
+    }
+  }
+
   for (const [path, loader] of Object.entries(modules)) {
     const fileName = path.split("/").pop() ?? path;
+    if (fileName === "Main.tsv") continue;
     let raw: string;
     try {
       raw = await loader();
@@ -211,8 +250,8 @@ async function runHistoryIngestInternal(): Promise<void> {
 
     const currentIds = new Set<string>();
     for (const row of rows) {
-      const id = await sha1(`${row.date}|${row.url}`);
-      currentIds.add(id);
+      const idStr = `${row.date}|${row.url}`;
+      currentIds.add(await sha1(idStr));
     }
 
     const toRemove = allFromDb.filter(
@@ -238,14 +277,14 @@ async function runHistoryIngestInternal(): Promise<void> {
       let title = row.title.trim() || undefined;
       let summary: string | undefined;
 
-      let ruUrl: string | undefined;
+      let ruUrl: string | undefined = row.ruUrl || undefined;
       if (row.url.includes("wikipedia.org")) {
         try {
           const wiki = await fetchWikiThumbnail(row.url);
           if (!title) title = wiki.title;
           summary = wiki.extract?.slice(0, 300);
           if (!thumbnailUrl && !hasLocalPic) thumbnailUrl = wiki.thumbnailUrl;
-          ruUrl = wiki.ruUrl;
+          if (!ruUrl) ruUrl = wiki.ruUrl;
         } catch {
           /* leave empty */
         }
@@ -265,10 +304,11 @@ async function runHistoryIngestInternal(): Promise<void> {
         previewBlob = undefined;
       }
 
+      const displayUrl = row.ruUrl || row.url;
       const ev: HistoricalEvent = {
         id,
         date: row.date,
-        url: row.url,
+        url: displayUrl,
         title: title ?? row.url,
         lang: row.lang,
         thumbnailUrl,
@@ -280,7 +320,7 @@ async function runHistoryIngestInternal(): Promise<void> {
         enrichVersion: ENRICH_VERSION,
         summary,
         importance: 3,
-        ruUrl,
+        ruUrl: displayUrl.startsWith("https://ru.wikipedia") ? undefined : ruUrl,
       };
       return ev;
     });

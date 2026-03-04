@@ -30,6 +30,7 @@ export function assignHistoricalLanes(
   const laneIntervals: { start: number; end: number }[][] = [];
 
   const result: (HistoricalEvent & { laneIndex: number })[] = [];
+  const laneDates: Set<string>[] = [new Set(), new Set()];
 
   for (const ev of sorted) {
     const evMs = new Date(ev.date).getTime();
@@ -47,23 +48,31 @@ export function assignHistoricalLanes(
     }
 
     let laneIdx: number;
-    if (freeLanes.length > 1) {
+    const sameDayLanes = [0, 1].filter((i) => laneDates[i]?.has(ev.date));
+    const avoidLanes = new Set(sameDayLanes);
+    const preferredLanes = freeLanes.filter((i) => !avoidLanes.has(i));
+
+    if (preferredLanes.length >= 1) {
+      laneIdx = preferredLanes.reduce((a, b) =>
+        (laneIntervals[a]?.length ?? 0) <= (laneIntervals[b]?.length ?? 0)
+          ? a
+          : b
+      );
+    } else if (freeLanes.length >= 1) {
       laneIdx = freeLanes.reduce((a, b) =>
         (laneIntervals[a]?.length ?? 0) <= (laneIntervals[b]?.length ?? 0)
           ? a
           : b
       );
-    } else if (freeLanes.length === 1) {
-      laneIdx = freeLanes[0];
     } else {
-      laneIdx =
-        (laneIntervals[0]?.length ?? 0) <= (laneIntervals[1]?.length ?? 0)
-          ? 0
-          : 1;
+      const preferNoSameDay = !sameDayLanes.includes(0) ? 0 : !sameDayLanes.includes(1) ? 1 : null;
+      laneIdx = preferNoSameDay ?? ((laneIntervals[0]?.length ?? 0) <= (laneIntervals[1]?.length ?? 0) ? 0 : 1);
     }
 
     if (!laneIntervals[laneIdx]) laneIntervals[laneIdx] = [];
     laneIntervals[laneIdx].push({ start: rangeStart, end: rangeEnd });
+    if (!laneDates[laneIdx]) laneDates[laneIdx] = new Set();
+    laneDates[laneIdx].add(ev.date);
     result.push({ ...ev, laneIndex: laneIdx });
   }
 
