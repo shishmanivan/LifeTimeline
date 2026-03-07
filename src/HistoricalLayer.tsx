@@ -87,6 +87,9 @@ type HistoricalCardProps = {
   mainEffectMode?: MainEffectMode;
   dimNonMain?: boolean;
   isOpen?: boolean;
+  hasAnimated?: boolean;
+  shouldAnimateMain?: boolean;
+  isLifted?: boolean;
 };
 
 function HistoricalCard({
@@ -99,6 +102,9 @@ function HistoricalCard({
   mainEffectMode = "none",
   dimNonMain = true,
   isOpen = false,
+  hasAnimated = false,
+  shouldAnimateMain = false,
+  isLifted = false,
 }: HistoricalCardProps) {
   const imageUrl = useResolvedImageUrl(event, getLocalImageUrl, historicalImageUrls);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -128,9 +134,19 @@ function HistoricalCard({
         : mainEffectMode === "small"
           ? 1.08
           : 1;
+  const showEntranceAnimation =
+    shouldAnimateMain && isMainEvent && mainEffectMode !== "none";
+  const entranceTranslateY = showEntranceAnimation && !hasAnimated ? 8 : 0;
+  const entranceOpacity = showEntranceAnimation && !hasAnimated ? 0 : 1;
   const cardStyle =
     isMainEvent && mainEffectMode !== "none"
-      ? { transform: `translateX(-50%) scale(${mainScale})` }
+      ? {
+          transform: `translateX(-50%) translateY(${entranceTranslateY}px) scale(${mainScale})`,
+          opacity: entranceOpacity,
+          transition: showEntranceAnimation
+            ? "opacity 140ms ease-out 120ms, transform 140ms ease-out 120ms"
+            : undefined,
+        }
       : { transform: "translateX(-50%)" };
 
   const dimClass =
@@ -157,6 +173,9 @@ function HistoricalCard({
       : 0;
   const topWithOffset = top + microOffset;
 
+  /** 1960s and earlier: desaturate color images (e.g. flags) to match B&W aesthetic */
+  const isVintageEra = event.date < "1970-01-01";
+
   return (
     <article
       data-event-id={event.id}
@@ -164,7 +183,11 @@ function HistoricalCard({
       style={{
         left: `${event.xPx}px`,
         top: `${topWithOffset}px`,
-        zIndex: isMainEvent && mainEffectMode !== "none" ? 2 : undefined,
+        zIndex: isLifted
+          ? 100
+          : isMainEvent && mainEffectMode !== "none"
+            ? 2
+            : undefined,
         ...cardStyle,
       }}
     >
@@ -175,7 +198,9 @@ function HistoricalCard({
           else cardRefsMap.current.delete(event.id);
         }}
       >
-        <div className="cardImage cardImage-historical">
+        <div
+          className={`cardImage cardImage-historical ${isVintageEra ? "hist-image-vintage" : ""}`.trim()}
+        >
           <div className="card-image-placeholder" aria-hidden="true" />
           {imageUrl && (
             <img
@@ -213,6 +238,12 @@ type HistoricalLayerProps = {
   dimNonMain?: boolean;
   /** ID of open (modal) event — for main card accent */
   openEventId?: string | null;
+  /** MAIN events that have played entrance animation (10y/5y only) */
+  mainEventAnimatedIds?: Set<string>;
+  /** Whether to run entrance animation for MAIN events (scale 10y or 5y) */
+  shouldAnimateMain?: boolean;
+  /** Event lifted to front after 500ms hover (hidden behind others) */
+  liftedHistId?: string | null;
 };
 
 export function HistoricalLayer({
@@ -226,6 +257,9 @@ export function HistoricalLayer({
   mainEffectMode = "none",
   dimNonMain = true,
   openEventId = null,
+  mainEventAnimatedIds,
+  shouldAnimateMain = false,
+  liftedHistId = null,
 }: HistoricalLayerProps) {
   const isEffectActive = mainEffectMode !== "none";
   const sortedEvents =
@@ -282,6 +316,9 @@ export function HistoricalLayer({
             mainEffectMode={mainEffectMode}
             dimNonMain={dimNonMain}
             isOpen={openEventId === event.id}
+            hasAnimated={mainEventAnimatedIds?.has(event.id) ?? false}
+            shouldAnimateMain={shouldAnimateMain}
+            isLifted={liftedHistId === event.id}
           />
         );
       })}

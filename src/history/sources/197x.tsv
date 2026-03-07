@@ -13,7 +13,7 @@ date	en_url	image	en_title	ru_title	ru_url
 1976-09-09	https://en.wikipedia.org/wiki/Mao_Zedong		Death of Mao Zedong	Умер Мао Цзэдун	https://ru.wikipedia.org/wiki/%D0%9C%D0%B0%D0%BE_%D0%A6%D0%B7%D1%8D%D0%B4%D1%83%D0%BD
 1976-07-04	https://en.wikipedia.org/wiki/United_States_Bicentennial		United States Bicentennial	200-летие независимости США	https://ru.wikipedia.org/wiki/%D0%A1%D0%BE%D0%B5%D0%B4%D0%B8%D0%BD%D1%91%D0%BD%D0%BD%D1%8B%D0%B5_%D0%A8%D1%82%D0%B0%D1%82%D1%8B_%D0%90%D0%BC%D0%B5%D1%80%D0%B8%D0%BA%D0%B8
 1976-07-28	https://en.wikipedia.org/wiki/1976_Tangshan_earthquake		Tangshan earthquake	Землетрясение в Таншане	https://ru.wikipedia.org/wiki/%D0%A2%D0%B0%D0%BD%D1%88%D0%B0%D0%BD%D1%8C%D1%81%D0%BA%D0%BE%D0%B5_%D0%B7%D0%B5%D0%BC%D0%BB%D0%B5%D1%82%D1%80%D1%8F%D1%81%D0%B5%D0%BD%D0%B8%D0%B5
-1975-04-30	https://en.wikipedia.org/wiki/Fall_of_Saigon		Fall of Saigon	Падение Сайгона	https://ru.wikipedia.org/wiki/%D0%9F%D0%B0%D0%B4%D0%B5%D0%BD%D0%B8%D0%B5_%D0%A1%D0%B0%D0%B9%D0%B3%D0%BE%D0%BD%D0%B0
+1975-04-30	https://en.wikipedia.org/wiki/Fall_of_Saigon	https://upload.wikimedia.org/wikipedia/commons/9/9c/CH-53_landing_at_Defense_Attach%C3%A9_Office_compound%2C_Operation_Frequent_Wind.jpg	Fall of Saigon	Падение Сайгона	https://ru.wikipedia.org/wiki/%D0%9F%D0%B0%D0%B4%D0%B5%D0%BD%D0%B8%D0%B5_%D0%A1%D0%B0%D0%B9%D0%B3%D0%BE%D0%BD%D0%B0
 1975-04-17	https://en.wikipedia.org/wiki/Fall_of_Phnom_Penh		Fall of Phnom Penh	Падение Пномпеня	https://ru.wikipedia.org/wiki/%D0%9F%D0%B0%D0%B4%D0%B5%D0%BD%D0%B8%D0%B5_%D0%9F%D0%BD%D0%BE%D0%BC%D0%BF%D0%B5%D0%BD%D1%8F
 1975-08-01	https://en.wikipedia.org/wiki/Helsinki_Accords		Helsinki Accords signed	Подписание Хельсинкских соглашений	https://ru.wikipedia.org/wiki/%D0%A5%D0%B5%D0%BB%D1%8C%D1%81%D0%B8%D0%BD%D0%BA%D1%81%D0%BA%D0%B8%D0%B5_%D1%81%D0%BE%D0%B3%D0%BB%D0%B0%D1%88%D0%B5%D0%BD%D0%B8%D1%8F
 1975-11-11	https://en.wikipedia.org/wiki/Angolan_Civil_War		Start of the Angolan Civil War	Начало гражданской войны в Анголе	https://ru.wikipedia.org/wiki/%D0%93%D1%80%D0%B0%D0%B6%D0%B4%D0%B0%D0%BD%D1%81%D0%BA%D0%B0%D1%8F_%D0%B2%D0%BE%D0%B9%D0%BD%D0%B0_%D0%B2_%D0%90%D0%BD%D0%B3%D0%BE%D0%BB%D0%B5
@@ -41,6 +41,8 @@ date	en_url	image	en_title	ru_title	ru_url
 1972-01-30	https://en.wikipedia.org/wiki/Bloody_Sunday_(1972)	https://upload.wikimedia.org/wikipedia/en/2/28/Edward_Daly_Bloody_Sunday.jpg	Bloody Sunday	Кровавое воскресенье в Дерри	https://ru.wikipedia.org/wiki/%D0%9A%D1%80%D0%BE%D0%B2%D0%B0%D0%B2%D0%BE%D0%B5_%D0%B2%D0%BE%D1%81%D0%BA%D1%80%D0%B5%D1%81%D0%B5%D0%BD%D1%8C%D0%B5_(1972)
 1970-05-04	https://en.wikipedia.org/wiki/Kent_State_shootings	https://upload.wikimedia.org/wikipedia/ru/6/65/Kent_State_massacre.jpg	Kent State shootings	Стрельба в Университете штата Кент	https://ru.wikipedia.org/wiki/%D0%A0%D0%B0%D1%81%D1%81%D1%82%D1%80%D0%B5%D0%BB_%D0%B2_%D0%9A%D0%B5%D0%BD%D1%82%D1%81%D0%BA%D0%BE%D0%BC_%D1%83%D0%BD%D0%B8%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%82%D0%B5%D1%82%D0%B5
 1974-03-29	https://en.wikipedia.org/wiki/Terracotta_Army		Terracotta Army discovery	Открытие Терракотовой армии	https://ru.wikipedia.org/wiki/%D0%A2%D0%B5%D1%80%D1%80%D0%B0%D0%BA%D0%BE%D1%82%D0%BE%D0%B2%D0%B0%D1%8F_%D0%B0%D1%80%D0%BC%D0%B8%D1%8F
+1975-11-20	https://en.wikipedia.org/wiki/Francisco_Franco		Death of Francisco Franco	Умер Франсиско Франко	https://ru.wikipedia.org/wiki/Франко,_Франсиско
+
 
 
 

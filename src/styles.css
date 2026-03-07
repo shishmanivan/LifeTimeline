@@ -426,6 +426,30 @@ body {
   fill: #2a2a2a;
 }
 
+/* MAIN event entrance animation: point → line → card (10y/5y only, once) */
+.main-marker-initial .main-marker-dot-axis {
+  transform: scale(0);
+  transform-origin: center;
+}
+.main-marker-animated .main-marker-dot-axis {
+  transform: scale(1);
+  transition: transform 120ms ease-out;
+}
+.main-marker-initial .main-marker-line {
+  transition: stroke-dashoffset 160ms ease-out 120ms;
+}
+.main-marker-animated .main-marker-line {
+  transition: stroke-dashoffset 160ms ease-out 120ms;
+}
+.main-marker-initial .main-marker-dot-card {
+  opacity: 0;
+  transition: opacity 80ms ease-out 200ms;
+}
+.main-marker-animated .main-marker-dot-card {
+  opacity: 1;
+  transition: opacity 80ms ease-out 200ms;
+}
+
 .timeline-line-path.line-animate {
   animation: line-draw 1s ease-out forwards;
 }
@@ -487,6 +511,11 @@ body {
 .main-corridor-10y,
 .main-corridor-5y {
   background: transparent;
+}
+
+/* 1960s and earlier: desaturate color images (flags etc.) to match B&W aesthetic */
+.cardImage-historical.hist-image-vintage img {
+  filter: grayscale(0.8) saturate(0.35);
 }
 
 /* History hierarchy: main vs non-main by scale (10y, 5y). Filters on image only. */

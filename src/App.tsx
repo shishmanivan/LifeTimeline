@@ -220,6 +220,7 @@ function App() {
   const [visibleHistIds, setVisibleHistIds] = useState<Set<string>>(new Set());
   const [animatedLines, setAnimatedLines] = useState<Set<string>>(new Set());
   const [mainEventIds, setMainEventIds] = useState<Set<string>>(new Set());
+  const [mainEventAnimatedIds, setMainEventAnimatedIds] = useState<Set<string>>(new Set());
   const [linesData, setLinesData] = useState<
     { id: string; path: string; totalLength: number; lineVariant?: string }[]
   >([]);
@@ -232,6 +233,8 @@ function App() {
   const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleScrollStopRef = useRef<() => void>(() => {});
   const thumbnailUrlCacheRef = useRef<Map<string, string>>(new Map());
+  const [liftedHistId, setLiftedHistId] = useState<string | null>(null);
+  const hoverLiftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scale = scales[scaleIndex];
 
   const getActiveOffsets = (id: string): Offsets => {
@@ -675,6 +678,47 @@ function App() {
     axisDates,
   ]);
 
+  const histIdsSet = useMemo(
+    () => new Set(positionedHistorical.map((e) => e.id)),
+    [positionedHistorical]
+  );
+
+  const onHistoricalZoneMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (hoverLiftTimerRef.current) {
+        clearTimeout(hoverLiftTimerRef.current);
+        hoverLiftTimerRef.current = null;
+      }
+      const elements = document.elementsFromPoint(e.clientX, e.clientY);
+      const articlesAtPoint: string[] = [];
+      for (const el of elements) {
+        const article = (el as HTMLElement).closest?.(".event-historical[data-event-id]");
+        if (article) {
+          const id = article.getAttribute("data-event-id");
+          if (id && histIdsSet.has(id) && !articlesAtPoint.includes(id)) {
+            articlesAtPoint.push(id);
+          }
+        }
+      }
+      const bottomId = articlesAtPoint[articlesAtPoint.length - 1];
+      if (bottomId) {
+        hoverLiftTimerRef.current = setTimeout(() => {
+          hoverLiftTimerRef.current = null;
+          setLiftedHistId(bottomId);
+        }, 500);
+      }
+    },
+    [histIdsSet]
+  );
+
+  const onHistoricalZoneMouseLeave = useCallback(() => {
+    if (hoverLiftTimerRef.current) {
+      clearTimeout(hoverLiftTimerRef.current);
+      hoverLiftTimerRef.current = null;
+    }
+    setLiftedHistId(null);
+  }, []);
+
   const measureLayout = useCallback(() => {
     const timeline = timelineRef.current;
     const axis = axisRef.current;
@@ -757,6 +801,19 @@ function App() {
     });
     return () => observer.disconnect();
   }, [positionedPersonal, positionedHistorical]);
+
+  useEffect(() => {
+    if (scale !== "10y" && scale !== "5y") return;
+    setMainEventAnimatedIds((prev) => {
+      const next = new Set<string>();
+      for (const id of visibleHistIds) {
+        if (mainEventIds.has(id)) next.add(id);
+      }
+      if (next.size !== prev.size || [...next].some((id) => !prev.has(id)))
+        return next;
+      return prev;
+    });
+  }, [visibleHistIds, mainEventIds, scale]);
 
   useLayoutEffect(() => {
     const timeline = timelineRef.current;
@@ -1201,29 +1258,53 @@ function App() {
 
         {mainMarkersData.length > 0 && (
           <svg className="main-markers-overlay" aria-hidden>
-            {mainMarkersData.map((m) => (
-              <g key={m.id}>
-                <line
-                  x1={m.xPx}
-                  y1={m.yCardTop}
-                  x2={m.xPx}
-                  y2={m.yAxis}
-                  className={`main-marker-line main-marker-line-${m.scale}`}
-                />
-                <circle
-                  cx={m.xPx}
-                  cy={m.yCardTop}
-                  r={m.scale === "10y" ? 4 : 3}
-                  className="main-marker-dot"
-                />
-                <circle
-                  cx={m.xPx}
-                  cy={m.yAxis}
-                  r={m.scale === "10y" ? 4 : 3}
-                  className="main-marker-dot"
-                />
-              </g>
-            ))}
+            {mainMarkersData.map((m) => {
+              const shouldAnimate = (scale === "10y" || scale === "5y") && m.scale !== "small";
+              const isAnimated = mainEventAnimatedIds.has(m.id);
+              const lineLength = Math.abs(m.yCardTop - m.yAxis);
+              const animateIn = shouldAnimate && isAnimated;
+              const showInitial = shouldAnimate && !isAnimated;
+              return (
+                <g
+                  key={m.id}
+                  className={
+                    showInitial
+                      ? "main-marker main-marker-initial"
+                      : animateIn
+                        ? "main-marker main-marker-animated"
+                        : "main-marker"
+                  }
+                >
+                  <line
+                    x1={m.xPx}
+                    y1={m.yAxis}
+                    y2={m.yCardTop}
+                    x2={m.xPx}
+                    className={`main-marker-line main-marker-line-${m.scale}`}
+                    style={
+                      shouldAnimate
+                        ? {
+                            strokeDasharray: lineLength,
+                            strokeDashoffset: isAnimated ? 0 : lineLength,
+                          }
+                        : undefined
+                    }
+                  />
+                  <circle
+                    cx={m.xPx}
+                    cy={m.yCardTop}
+                    r={m.scale === "10y" ? 4 : 3}
+                    className="main-marker-dot main-marker-dot-card"
+                  />
+                  <circle
+                    cx={m.xPx}
+                    cy={m.yAxis}
+                    r={m.scale === "10y" ? 4 : 3}
+                    className="main-marker-dot main-marker-dot-axis"
+                  />
+                </g>
+              );
+            })}
           </svg>
         )}
 
@@ -1253,6 +1334,8 @@ function App() {
                 height: HIST_ZONE_HEIGHT,
                 overflow: "visible",
               }}
+              onMouseMove={onHistoricalZoneMouseMove}
+              onMouseLeave={onHistoricalZoneMouseLeave}
             >
               <HistoricalLayer
                 events={positionedHistorical}
@@ -1266,6 +1349,9 @@ function App() {
                 }
                 dimNonMain={scale === "10y" || scale === "5y"}
                 openEventId={selectedHistoricalEvent?.id ?? null}
+                mainEventAnimatedIds={mainEventAnimatedIds}
+                shouldAnimateMain={scale === "10y" || scale === "5y"}
+                liftedHistId={liftedHistId}
               />
             </div>
           </>
