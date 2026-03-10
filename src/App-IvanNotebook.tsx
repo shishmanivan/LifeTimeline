@@ -1062,7 +1062,6 @@ function App() {
               getActiveOffsets={getActiveOffsets}
               isDirty={isDirty}
               altHeld={altHeld}
-              onDelete={handleDeletePhoto}
               onConfirmOffsets={handleConfirmOffsets}
               onCancelOffsets={handleCancelOffsets}
               onOverlayOpen={setOverlayPhotoId}

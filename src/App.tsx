@@ -2,12 +2,17 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   deletePhoto,
   getAllPhotos,
+  getAllSeries,
   getHistoricalEventsInRange,
   savePhoto,
+  saveSeries,
   updatePhotoOffsets,
-  updatePhotoNote,
+  updatePhotoMetadata,
+  updatePhotoImage,
+  updatePhotoSeriesId,
   updatePhotoPreview,
   type PhotoRecord,
+  type SeriesRecord,
 } from "./db";
 import type { HistoricalEvent } from "./history/types";
 import { runHistoryIngest } from "./history/ingestHistory";
@@ -55,6 +60,7 @@ const CARD_WIDTH_PERCENT = 18;
 const LANE_HEIGHT = 140;
 const EPS = 0.01;
 const SCROLL_STOP_DEBOUNCE_MS = 200;
+const SERIES_LINES_SCROLL_STOP_MS = 1000;
 
 function hashId(id: string): number {
   let h = 0;
@@ -190,6 +196,15 @@ function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [overlayPhotoId, setOverlayPhotoId] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
+  const [overlayEditMode, setOverlayEditMode] = useState(false);
+  const [linkingMode, setLinkingMode] = useState(false);
+  const [linkingSourcePhotoId, setLinkingSourcePhotoId] = useState<string | null>(
+    null
+  );
+  const [hoveredPhotoId, setHoveredPhotoId] = useState<string | null>(null);
+  const [hoveredSeriesId, setHoveredSeriesId] = useState<string | null>(null);
+  const hoverSeriesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [seriesMap, setSeriesMap] = useState<Record<string, string>>({});
   const [selectedHistoricalEvent, setSelectedHistoricalEvent] =
     useState<HistoricalEvent | null>(null);
   const [centerDate, setCenterDate] = useState(() =>
@@ -256,51 +271,64 @@ function App() {
     );
   };
 
+  const loadPhotosFromDb = useCallback(async () => {
+    const records = await getAllPhotos();
+    const today = todayStr();
+    const photos: PersonalPhoto[] = records.map((r) => {
+      const date = r.date > today ? today : r.date;
+      const image = URL.createObjectURL(r.previewBlob ?? r.imageBlob);
+      objectUrlsRef.current.set(r.id, image);
+      imageBlobsRef.current.set(r.id, r.imageBlob);
+      return {
+        id: r.id,
+        title: r.title,
+        date,
+        image,
+        offsetXDays: r.offsetXDays ?? 0,
+        offsetY: r.offsetY ?? 0,
+        note: r.note,
+        showOnTimeline: r.showOnTimeline !== false,
+        seriesId: r.seriesId,
+      };
+    });
+    setPersonalPhotos(photos);
+
+    for (const r of records) {
+      if (r.previewBlob) continue;
+      try {
+        const previewBlob = await generatePreviewBlob(r.imageBlob);
+        await updatePhotoPreview(r.id, previewBlob);
+        const oldUrl = objectUrlsRef.current.get(r.id);
+        if (oldUrl) URL.revokeObjectURL(oldUrl);
+        const newImage = URL.createObjectURL(previewBlob);
+        objectUrlsRef.current.set(r.id, newImage);
+        setPersonalPhotos((prev) =>
+          prev.map((p) => (p.id === r.id ? { ...p, image: newImage } : p))
+        );
+      } catch {
+        /* keep original */
+      }
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    getAllPhotos().then(async (records) => {
-      if (cancelled) return;
-      const today = todayStr();
-      const photos: PersonalPhoto[] = records.map((r) => {
-        const date = r.date > today ? today : r.date;
-        const image = URL.createObjectURL(r.previewBlob ?? r.imageBlob);
-        objectUrlsRef.current.set(r.id, image);
-        imageBlobsRef.current.set(r.id, r.imageBlob);
-        return {
-          id: r.id,
-          title: r.title,
-          date,
-          image,
-          offsetXDays: r.offsetXDays ?? 0,
-          offsetY: r.offsetY ?? 0,
-          note: r.note,
-        };
-      });
-      setPersonalPhotos(photos);
-
-      for (const r of records) {
-        if (cancelled) break;
-        if (r.previewBlob) continue;
-        try {
-          const previewBlob = await generatePreviewBlob(r.imageBlob);
-          if (cancelled) return;
-          await updatePhotoPreview(r.id, previewBlob);
-          if (cancelled) return;
-          const oldUrl = objectUrlsRef.current.get(r.id);
-          if (oldUrl) URL.revokeObjectURL(oldUrl);
-          const newImage = URL.createObjectURL(previewBlob);
-          objectUrlsRef.current.set(r.id, newImage);
-          setPersonalPhotos((prev) =>
-            prev.map((p) => (p.id === r.id ? { ...p, image: newImage } : p))
-          );
-        } catch {
-          /* keep original */
-        }
-      }
+    loadPhotosFromDb().catch((err) => {
+      if (!cancelled) console.error("[photos] load failed", err);
     });
     return () => {
       cancelled = true;
     };
+  }, [loadPhotosFromDb]);
+
+  useEffect(() => {
+    getAllSeries().then((series) => {
+      const map: Record<string, string> = {};
+      series.forEach((s) => {
+        map[s.id] = s.title;
+      });
+      setSeriesMap(map);
+    });
   }, []);
 
   useEffect(() => {
@@ -401,7 +429,13 @@ function App() {
   }, [overlayPhotoId]);
 
   useEffect(() => {
-    const onWheel = (e: WheelEvent) => e.preventDefault();
+    const onWheel = (e: WheelEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest(".personal-modal-overlay, .modal-overlay, .historical-modal-overlay")) {
+        return;
+      }
+      e.preventDefault();
+    };
     document.addEventListener("wheel", onWheel, { passive: false });
     return () => document.removeEventListener("wheel", onWheel);
   }, []);
@@ -428,7 +462,20 @@ function App() {
         });
       }
     };
+    const onScrollActivity = () => {
+      if (seriesLinesScrollStopTimerRef.current) {
+        clearTimeout(seriesLinesScrollStopTimerRef.current);
+        seriesLinesScrollStopTimerRef.current = null;
+      }
+      setSeriesLinesData([]);
+      setSeriesLinesScrollStopped(false);
+      seriesLinesScrollStopTimerRef.current = setTimeout(() => {
+        seriesLinesScrollStopTimerRef.current = null;
+        setSeriesLinesScrollStopped(true);
+      }, SERIES_LINES_SCROLL_STOP_MS);
+    };
     const schedule = () => {
+      onScrollActivity();
       if (scrollStopTimerRef.current) clearTimeout(scrollStopTimerRef.current);
       scrollStopTimerRef.current = setTimeout(() => {
         scrollStopTimerRef.current = null;
@@ -448,10 +495,56 @@ function App() {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onMove);
       if (scrollStopTimerRef.current) clearTimeout(scrollStopTimerRef.current);
+      if (seriesLinesScrollStopTimerRef.current) {
+        clearTimeout(seriesLinesScrollStopTimerRef.current);
+        seriesLinesScrollStopTimerRef.current = null;
+      }
     };
   }, []);
 
   const [altHeld, setAltHeld] = useState(false);
+
+  useEffect(() => {
+    if (hoverSeriesTimerRef.current) {
+      clearTimeout(hoverSeriesTimerRef.current);
+      hoverSeriesTimerRef.current = null;
+    }
+    if (!hoveredPhotoId) {
+      setHoveredSeriesId(null);
+      return;
+    }
+    const photo = personalPhotos.find((p) => p.id === hoveredPhotoId);
+    if (!photo?.seriesId) {
+      setHoveredSeriesId(null);
+      return;
+    }
+    hoverSeriesTimerRef.current = setTimeout(() => {
+      hoverSeriesTimerRef.current = null;
+      setHoveredSeriesId(photo.seriesId ?? null);
+    }, 1000);
+    return () => {
+      if (hoverSeriesTimerRef.current) {
+        clearTimeout(hoverSeriesTimerRef.current);
+      }
+    };
+  }, [hoveredPhotoId, personalPhotos]);
+
+  const isPhotoDimmed = useCallback(
+    (photoId: string): boolean => {
+      if (!hoveredSeriesId) return false;
+      const photo = personalPhotos.find((p) => p.id === photoId);
+      return !photo || photo.seriesId !== hoveredSeriesId;
+    },
+    [hoveredSeriesId, personalPhotos]
+  );
+
+  const [seriesLinesData, setSeriesLinesData] = useState<
+    { id: string; path: string }[]
+  >([]);
+  const [seriesLinesScrollStopped, setSeriesLinesScrollStopped] =
+    useState(false);
+  const seriesLinesScrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.altKey) setAltHeld(true);
@@ -537,6 +630,11 @@ function App() {
     };
   }, [axisDates, scale]);
 
+  const photosForTimeline = useMemo(
+    () => personalPhotos.filter((p) => p.showOnTimeline !== false),
+    [personalPhotos]
+  );
+
   const positionedPersonal = useMemo((): PositionedPhoto[] => {
     if (!layoutInfo) return [];
     const { width } = layoutInfo;
@@ -545,7 +643,7 @@ function App() {
     const axisStart = axisDates.start;
     const maxOffset = MAX_OFFSET_DAYS[scale];
 
-    const withPosition = personalPhotos
+    const withPosition = photosForTimeline
       .map((photo) => {
         const active = getActiveOffsets(photo.id);
         const offsetXDays = Math.max(
@@ -588,11 +686,58 @@ function App() {
       ...manualLayout.map((p) => ({ ...p, laneIndex: 0, isManual: true })),
     ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [
-    personalPhotos,
+    photosForTimeline,
     layoutInfo,
     scale,
     axisDates,
     pendingOffsets,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!hoveredSeriesId || !layoutInfo || !seriesLinesScrollStopped) {
+      setSeriesLinesData([]);
+      return;
+    }
+    const seriesPhotos = positionedPersonal.filter(
+      (p) => p.seriesId === hoveredSeriesId
+    );
+    if (seriesPhotos.length < 2) {
+      setSeriesLinesData([]);
+      return;
+    }
+    const tl = timelineRef.current;
+    if (!tl) {
+      setSeriesLinesData([]);
+      return;
+    }
+    const tlRect = tl.getBoundingClientRect();
+    const sorted = [...seriesPhotos].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+    const lines: { id: string; path: string }[] = [];
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const cardA = personalCardRefs.current.get(sorted[i].id);
+      const cardB = personalCardRefs.current.get(sorted[i + 1].id);
+      if (!cardA || !cardB) continue;
+      const rectA = cardA.getBoundingClientRect();
+      const rectB = cardB.getBoundingClientRect();
+      const ax = rectA.left - tlRect.left + rectA.width / 2;
+      const ay = rectA.bottom - tlRect.top;
+      const bx = rectB.left - tlRect.left + rectB.width / 2;
+      const by = rectB.bottom - tlRect.top;
+      const midY = Math.min(ay, by) - 50;
+      const path = `M ${ax} ${ay} Q ${(ax + bx) / 2} ${midY} ${bx} ${by}`;
+      lines.push({
+        id: `${sorted[i].id}-${sorted[i + 1].id}`,
+        path,
+      });
+    }
+    setSeriesLinesData(lines);
+  }, [
+    hoveredSeriesId,
+    positionedPersonal,
+    layoutInfo,
+    seriesLinesScrollStopped,
   ]);
 
   /** Use stored laneIndex — never recalculate (assigned at ingest) */
@@ -1021,6 +1166,242 @@ function App() {
     resetLineAnimation(id);
   };
 
+  const photosInDay = useMemo(() => {
+    if (!overlayPhotoId) return [];
+    const current = personalPhotos.find((p) => p.id === overlayPhotoId);
+    if (!current) return [];
+    return personalPhotos
+      .filter((p) => p.date === current.date)
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }, [overlayPhotoId, personalPhotos]);
+
+  const photosInSeries = useMemo(() => {
+    if (!overlayPhotoId) return [];
+    const current = personalPhotos.find((p) => p.id === overlayPhotoId);
+    if (!current?.seriesId) return [];
+    return personalPhotos
+      .filter((p) => p.seriesId === current.seriesId)
+      .sort((a, b) => {
+        const d = new Date(a.date).getTime() - new Date(b.date).getTime();
+        return d !== 0 ? d : a.id.localeCompare(b.id);
+      });
+  }, [overlayPhotoId, personalPhotos]);
+
+  const seriesTitle = useMemo(() => {
+    const current = personalPhotos.find((p) => p.id === overlayPhotoId);
+    if (!current?.seriesId) return null;
+    return seriesMap[current.seriesId] ?? null;
+  }, [overlayPhotoId, personalPhotos, seriesMap]);
+
+  const handleOverlayClose = useCallback(() => {
+    setOverlayPhotoId(null);
+    setOverlayEditMode(false);
+    setLinkingMode(false);
+    setLinkingSourcePhotoId(null);
+  }, []);
+
+  const handleStartLinking = useCallback(() => {
+    const sourceId = overlayPhotoId;
+    setOverlayPhotoId(null);
+    setOverlayEditMode(false);
+    setLinkingMode(true);
+    setLinkingSourcePhotoId(sourceId);
+  }, [overlayPhotoId]);
+
+  const handleCancelLink = useCallback(() => {
+    setLinkingMode(false);
+    setLinkingSourcePhotoId(null);
+    setOverlayPhotoId(null);
+  }, []);
+
+  useEffect(() => {
+    if (!linkingMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleCancelLink();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [linkingMode, handleCancelLink]);
+
+  const handleConfirmLink = useCallback(
+    async (targetPhotoId: string, chosenSeriesId: string | null) => {
+      const sourceId = linkingSourcePhotoId;
+      if (!sourceId) return;
+      const sourcePhoto = personalPhotos.find((p) => p.id === sourceId);
+      const targetPhoto = personalPhotos.find((p) => p.id === targetPhotoId);
+      if (!sourcePhoto || !targetPhoto) return;
+
+      const sourceSeries = sourcePhoto.seriesId;
+      const targetSeries = targetPhoto.seriesId;
+
+      if (sourceSeries && targetSeries && sourceSeries !== targetSeries) {
+        alert(
+          "Оба фото уже в разных сериях. Объединение серий пока не поддерживается. Сначала отвяжите одно из фото от серии."
+        );
+        return;
+      }
+
+      setLinkingMode(false);
+      setLinkingSourcePhotoId(null);
+      setOverlayPhotoId(null);
+
+      let seriesId: string;
+      if (chosenSeriesId) {
+        seriesId = chosenSeriesId;
+      } else {
+        const title =
+          prompt("Название новой группы:", "Я и Саня")?.trim() ?? "Серия";
+        seriesId = `series-${Date.now()}`;
+        await saveSeries({ id: seriesId, title });
+        setSeriesMap((prev) => ({ ...prev, [seriesId]: title }));
+      }
+
+      try {
+        await updatePhotoSeriesId(sourceId, seriesId);
+        await updatePhotoSeriesId(targetPhotoId, seriesId);
+      } catch (err) {
+        console.error("[link] DB update failed", err);
+        alert("Ошибка сохранения связи. Попробуйте ещё раз.");
+        return;
+      }
+
+      await loadPhotosFromDb();
+    },
+    [linkingSourcePhotoId, personalPhotos, loadPhotosFromDb]
+  );
+
+  const handleOverlaySave = useCallback(
+    (
+      id: string,
+      data: { date: string; title: string; note: string }
+    ) => {
+      updatePhotoMetadata(id, data).then(() => {
+        setPersonalPhotos((prev) =>
+          prev.map((p) =>
+            p.id === id
+              ? { ...p, date: data.date, title: data.title, note: data.note }
+              : p
+          )
+        );
+        setOverlayEditMode(false);
+      });
+    },
+    []
+  );
+
+  const handleReplaceImage = useCallback(
+    (id: string, file: File) => {
+      generatePreviewBlob(file)
+        .then((previewBlob) => {
+          return updatePhotoImage(id, file, previewBlob).then(() => {
+            const url = objectUrlsRef.current.get(id);
+            if (url) URL.revokeObjectURL(url);
+            const newUrl = URL.createObjectURL(previewBlob);
+            objectUrlsRef.current.set(id, newUrl);
+            imageBlobsRef.current.set(id, file);
+            setPersonalPhotos((prev) =>
+              prev.map((p) => (p.id === id ? { ...p, image: newUrl } : p))
+            );
+            if (overlayPhotoId === id) {
+              setOverlayUrl(newUrl);
+            }
+          });
+        })
+        .catch(() => {
+          updatePhotoImage(id, file).then(() => {
+            const url = objectUrlsRef.current.get(id);
+            if (url) URL.revokeObjectURL(url);
+            const newUrl = URL.createObjectURL(file);
+            objectUrlsRef.current.set(id, newUrl);
+            imageBlobsRef.current.set(id, file);
+            setPersonalPhotos((prev) =>
+              prev.map((p) => (p.id === id ? { ...p, image: newUrl } : p))
+            );
+            if (overlayPhotoId === id) {
+              setOverlayUrl(newUrl);
+            }
+          });
+        });
+    },
+    [overlayPhotoId]
+  );
+
+  const handleAddPhotoToDay = useCallback(
+    (file: File) => {
+      const current = personalPhotos.find((p) => p.id === overlayPhotoId);
+      if (!current) return;
+      const safeDate =
+        current.date > todayStr() ? todayStr() : current.date;
+      const id = `photo-${Date.now()}`;
+      imageBlobsRef.current.set(id, file);
+      generatePreviewBlob(file)
+        .then((previewBlob) => {
+          const record: PhotoRecord = {
+            id,
+            title: "Фото",
+            date: safeDate,
+            type: "personal",
+            imageBlob: file,
+            previewBlob,
+            offsetY: 0,
+            offsetXDays: 0,
+            showOnTimeline: false,
+          };
+          return savePhoto(record).then(() => {
+            const image = URL.createObjectURL(previewBlob);
+            objectUrlsRef.current.set(id, image);
+            setPersonalPhotos((prev) => [
+              ...prev,
+              {
+                id,
+                title: record.title,
+                date: record.date,
+                image,
+                offsetXDays: 0,
+                offsetY: 0,
+                note: record.note,
+                showOnTimeline: false,
+              },
+            ]);
+            setOverlayPhotoId(id);
+            setOverlayUrl(image);
+          });
+        })
+        .catch(() => {
+          const record: PhotoRecord = {
+            id,
+            title: "Фото",
+            date: safeDate,
+            type: "personal",
+            imageBlob: file,
+            offsetY: 0,
+            offsetXDays: 0,
+            showOnTimeline: false,
+          };
+          savePhoto(record).then(() => {
+            const image = URL.createObjectURL(file);
+            objectUrlsRef.current.set(id, image);
+            setPersonalPhotos((prev) => [
+              ...prev,
+              {
+                id,
+                title: record.title,
+                date: record.date,
+                image,
+                offsetXDays: 0,
+                offsetY: 0,
+                note: record.note,
+                showOnTimeline: false,
+              },
+            ]);
+            setOverlayPhotoId(id);
+            setOverlayUrl(image);
+          });
+        });
+    },
+    [overlayPhotoId, personalPhotos]
+  );
+
   const handleDeletePhoto = (id: string) => {
     if (!window.confirm("Удалить фото? Это действие нельзя отменить.")) return;
     setCardDragging(null);
@@ -1041,7 +1422,47 @@ function App() {
     });
   };
 
+  const handleDeleteAllPhotosInDay = useCallback(() => {
+    if (!overlayPhotoId) return;
+    const current = personalPhotos.find((p) => p.id === overlayPhotoId);
+    if (!current) return;
+    const toDelete = personalPhotos.filter((p) => p.date === current.date);
+    if (toDelete.length === 0) return;
+    const msg =
+      toDelete.length === 1
+        ? "Удалить фото? Это действие нельзя отменить."
+        : `Удалить все ${toDelete.length} фото этого дня? Это действие нельзя отменить.`;
+    if (!window.confirm(msg)) return;
+    setCardDragging(null);
+    setOverlayPhotoId(null);
+    toDelete.forEach((p) => {
+      const url = objectUrlsRef.current.get(p.id);
+      if (url) {
+        URL.revokeObjectURL(url);
+        objectUrlsRef.current.delete(p.id);
+      }
+      imageBlobsRef.current.delete(p.id);
+    });
+    setPendingOffsets((prev) => {
+      const next = { ...prev };
+      toDelete.forEach((p) => delete next[p.id]);
+      return next;
+    });
+    Promise.all(toDelete.map((p) => deletePhoto(p.id))).then(() => {
+      const ids = new Set(toDelete.map((p) => p.id));
+      setPersonalPhotos((prev) => prev.filter((p) => !ids.has(p.id)));
+    });
+  }, [overlayPhotoId, personalPhotos]);
+
   const onWheel: React.WheelEventHandler<HTMLDivElement> = (e) => {
+    if (overlayPhotoId || modalOpen || linkingMode) {
+      const target = e.target as HTMLElement;
+      if (target.closest(".personal-modal-overlay, .modal-overlay")) {
+        return;
+      }
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
     const direction = e.deltaY > 0 ? 1 : -1;
     setScaleIndex((current) => {
@@ -1094,6 +1515,7 @@ function App() {
       startX: e.clientX,
       startCenterMs: effectiveCenter.getTime(),
     };
+    scheduleScrollStopRef.current();
   };
 
   useEffect(() => {
@@ -1199,17 +1621,54 @@ function App() {
                 : null;
             })()
           }
+          photosInDay={photosInDay.map((p) => ({
+            id: p.id,
+            title: p.title,
+            date: p.date,
+            note: p.note,
+          }))}
           imageUrl={overlayUrl}
           isOpen={true}
-          onClose={() => setOverlayPhotoId(null)}
-          onSave={(id, note) => {
-            updatePhotoNote(id, note).then(() => {
-              setPersonalPhotos((prev) =>
-                prev.map((p) => (p.id === id ? { ...p, note } : p))
-              );
-            });
-          }}
+          isEditMode={overlayEditMode}
+          isLinkingMode={linkingMode}
+          linkingSourcePhotoId={linkingSourcePhotoId}
+          onClose={handleOverlayClose}
+          onEdit={() => setOverlayEditMode(true)}
+          onSave={handleOverlaySave}
+          onReplaceImage={handleReplaceImage}
+          onAddPhotoToDay={handleAddPhotoToDay}
+          onNavigate={setOverlayPhotoId}
+          photosInSeries={photosInSeries.map((p) => ({
+            id: p.id,
+            image: p.image,
+            date: p.date,
+            title: p.title,
+          }))}
+          seriesTitle={seriesTitle}
+          onStartLinking={handleStartLinking}
+          onConfirmLink={handleConfirmLink}
+          onCancelLink={handleCancelLink}
+          onCloseLinkPrompt={() => setOverlayPhotoId(null)}
+          existingSeries={Object.entries(seriesMap).map(([id, title]) => ({
+            id,
+            title,
+          }))}
+          onDeletePhoto={handleDeletePhoto}
+          onDeleteAllPhotosInDay={handleDeleteAllPhotosInDay}
         />
+      )}
+
+      {linkingMode && !overlayPhotoId && (
+        <div className="linking-mode-banner">
+          <span>Режим связывания. Нажмите на другое фото на таймлайне.</span>
+          <button
+            type="button"
+            className="linking-mode-cancel"
+            onClick={handleCancelLink}
+          >
+            Отмена
+          </button>
+        </div>
       )}
 
       <HistoricalEventModal
@@ -1244,6 +1703,21 @@ function App() {
           </span>
         </div>
 
+        {seriesLinesData.length > 0 && (
+          <svg
+            className="series-lines-overlay"
+            aria-hidden
+            style={{ pointerEvents: "none" }}
+          >
+            {seriesLinesData.map((line) => (
+              <path
+                key={line.id}
+                d={line.path}
+                className="series-line-path"
+              />
+            ))}
+          </svg>
+        )}
         <svg className="timeline-lines-overlay" aria-hidden>
           {linesData.map((line) => (
             <MarkerLink
@@ -1319,25 +1793,27 @@ function App() {
               getActiveOffsets={getActiveOffsets}
               isDirty={isDirty}
               altHeld={altHeld}
-              onDelete={handleDeletePhoto}
               onConfirmOffsets={handleConfirmOffsets}
               onCancelOffsets={handleCancelOffsets}
               onOverlayOpen={setOverlayPhotoId}
+              onPhotoHover={setHoveredPhotoId}
+              isPhotoDimmed={isPhotoDimmed}
             />
-            <div
-              className="historical-zone"
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                top: layoutInfo.axisY,
-                height: HIST_ZONE_HEIGHT,
-                overflow: "visible",
-              }}
-              onMouseMove={onHistoricalZoneMouseMove}
-              onMouseLeave={onHistoricalZoneMouseLeave}
-            >
-              <HistoricalLayer
+            {!linkingMode && (
+              <div
+                className="historical-zone"
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: layoutInfo.axisY,
+                  height: HIST_ZONE_HEIGHT,
+                  overflow: "visible",
+                }}
+                onMouseMove={onHistoricalZoneMouseMove}
+                onMouseLeave={onHistoricalZoneMouseLeave}
+              >
+                <HistoricalLayer
                 events={positionedHistorical}
                 axisY={layoutInfo.axisY}
                 cardRefsMap={historicalCardRefs}
@@ -1353,7 +1829,8 @@ function App() {
                 shouldAnimateMain={scale === "10y" || scale === "5y"}
                 liftedHistId={liftedHistId}
               />
-            </div>
+              </div>
+            )}
           </>
         )}
       </main>

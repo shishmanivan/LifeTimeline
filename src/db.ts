@@ -2,9 +2,15 @@ import type { HistoricalEvent } from "./history/types";
 import { assignHistoricalLanes } from "./history/laneAssignment";
 
 const DB_NAME = "LifeTimelineDB";
-const DB_VERSION = 7;
+const DB_VERSION = 9;
 const STORE_NAME = "photos";
 const HISTORICAL_STORE = "historicalEvents";
+const SERIES_STORE = "photoSeries";
+
+export type SeriesRecord = {
+  id: string;
+  title: string;
+};
 
 export type PhotoRecord = {
   id: string;
@@ -17,6 +23,10 @@ export type PhotoRecord = {
   offsetXDays?: number;
   /** Post/description text, editable in modal */
   note?: string;
+  /** If false, photo is hidden from timeline (only visible when browsing day) */
+  showOnTimeline?: boolean;
+  /** Series this photo belongs to */
+  seriesId?: string;
 };
 
 function openDB(): Promise<IDBDatabase> {
@@ -34,12 +44,18 @@ function openDB(): Promise<IDBDatabase> {
         const store = db.createObjectStore(HISTORICAL_STORE, { keyPath: "id" });
         store.createIndex("date", "date");
       }
+      if (!db.objectStoreNames.contains(SERIES_STORE)) {
+        db.createObjectStore(SERIES_STORE, { keyPath: "id" });
+      }
       const tx = ev.target.transaction;
       if ((ev.newVersion ?? db.version) === 6 && tx) {
         migrateHistoricalStripLegacyOffsets(tx);
       }
       if ((ev.newVersion ?? db.version) === 7 && tx) {
         migrateHistoricalLaneIndex(tx);
+      }
+      if ((ev.newVersion ?? db.version) === 9 && !db.objectStoreNames.contains(SERIES_STORE)) {
+        db.createObjectStore(SERIES_STORE, { keyPath: "id" });
       }
     };
   });
@@ -107,6 +123,76 @@ export async function updatePhotoNote(
   const record = await getPhoto(id);
   if (!record) return;
   await savePhoto({ ...record, note });
+}
+
+export type PhotoMetadataUpdate = {
+  date?: string;
+  title?: string;
+  note?: string;
+};
+
+export async function updatePhotoMetadata(
+  id: string,
+  update: PhotoMetadataUpdate
+): Promise<void> {
+  const record = await getPhoto(id);
+  if (!record) return;
+  await savePhoto({ ...record, ...update });
+}
+
+export async function updatePhotoImage(
+  id: string,
+  imageBlob: Blob,
+  previewBlob?: Blob
+): Promise<void> {
+  const record = await getPhoto(id);
+  if (!record) return;
+  await savePhoto({ ...record, imageBlob, previewBlob });
+}
+
+export async function updatePhotoSeriesId(
+  id: string,
+  seriesId: string | undefined
+): Promise<void> {
+  const record = await getPhoto(id);
+  if (!record) return;
+  await savePhoto({ ...record, seriesId });
+}
+
+export async function saveSeries(series: SeriesRecord): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SERIES_STORE, "readwrite");
+    const store = tx.objectStore(SERIES_STORE);
+    const request = store.put(series);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getAllSeries(): Promise<SeriesRecord[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SERIES_STORE, "readonly");
+    const store = tx.objectStore(SERIES_STORE);
+    const request = store.getAll();
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result || []);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getSeries(id: string): Promise<SeriesRecord | null> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SERIES_STORE, "readonly");
+    const store = tx.objectStore(SERIES_STORE);
+    const request = store.get(id);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result ?? null);
+    tx.oncomplete = () => db.close();
+  });
 }
 
 export async function deletePhoto(id: string): Promise<void> {

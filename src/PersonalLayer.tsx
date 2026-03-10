@@ -8,6 +8,8 @@ export type PersonalPhoto = {
   offsetXDays: number;
   offsetY: number;
   note?: string;
+  showOnTimeline?: boolean;
+  seriesId?: string;
 };
 
 export type PositionedPhoto = PersonalPhoto & {
@@ -25,10 +27,11 @@ type PersonalLayerProps = {
   getActiveOffsets: (id: string) => Offsets;
   isDirty: (id: string) => boolean;
   altHeld: boolean;
-  onDelete: (id: string) => void;
   onConfirmOffsets: (id: string) => void;
   onCancelOffsets: (id: string) => void;
   onOverlayOpen: (id: string) => void;
+  onPhotoHover?: (photoId: string | null) => void;
+  isPhotoDimmed?: (photoId: string) => boolean;
 };
 
 const PERSONAL_BASE_Y_OFFSET = 120;
@@ -44,10 +47,11 @@ export function PersonalLayer({
   getActiveOffsets,
   isDirty,
   altHeld,
-  onDelete,
   onConfirmOffsets,
   onCancelOffsets,
   onOverlayOpen,
+  onPhotoHover,
+  isPhotoDimmed,
 }: PersonalLayerProps) {
   const baseY = axisY - PERSONAL_BASE_Y_OFFSET;
 
@@ -62,11 +66,12 @@ export function PersonalLayer({
           (photo.laneIndex ?? 0) * LANE_HEIGHT +
           active.offsetY;
 
+        const dimmed = isPhotoDimmed?.(photo.id) ?? false;
         return (
           <article
             key={photo.id}
             data-event-id={photo.id}
-            className={`event event-personal event-photo ${cardDragging === photo.id ? "event-photo-dragging" : ""} ${altHeld ? "event-photo-grab" : ""}`}
+            className={`event event-personal event-photo ${cardDragging === photo.id ? "event-photo-dragging" : ""} ${altHeld ? "event-photo-grab" : ""} ${dimmed ? "event-photo-dimmed" : ""}`}
             style={{
               left: `${photo.xPx}px`,
               top: `${y}px`,
@@ -79,26 +84,14 @@ export function PersonalLayer({
                 if (el) cardRefsMap.current.set(photo.id, el);
                 else cardRefsMap.current.delete(photo.id);
               }}
+              onMouseEnter={() => onPhotoHover?.(photo.id)}
+              onMouseLeave={() => onPhotoHover?.(null)}
             >
-              {inEditMode && (
+              {inEditMode && dirty && (
                 <>
                   <button
                     type="button"
-                    className="card-delete"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(photo.id);
-                    }}
-                    title="Удалить"
-                    aria-label="Удалить"
-                  >
-                    ×
-                  </button>
-                  {dirty && (
-                    <>
-                      <button
-                        type="button"
-                        className="card-confirm"
+                    className="card-confirm"
                         onClick={(e) => {
                           e.stopPropagation();
                           onConfirmOffsets(photo.id);
@@ -120,8 +113,6 @@ export function PersonalLayer({
                       >
                         ↺
                       </button>
-                    </>
-                  )}
                 </>
               )}
               <div className="cardImage">
