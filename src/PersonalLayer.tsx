@@ -7,6 +7,7 @@ export type PersonalPhoto = {
   image: string;
   offsetXDays: number;
   offsetY: number;
+  laneIndex?: number;
   note?: string;
   showOnTimeline?: boolean;
   seriesId?: string;

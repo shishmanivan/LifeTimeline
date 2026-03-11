@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  assignPersonalLaneIndex,
   deletePhoto,
   getAllPhotos,
+  getPhoto,
   getAllSeries,
   getHistoricalEventsInRange,
   savePhoto,
@@ -56,11 +58,9 @@ const scaleMeta: Record<Scale, { label: string; rangeDays: number }> = {
 };
 
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
-const CARD_WIDTH_PERCENT = 18;
 const LANE_HEIGHT = 140;
 const EPS = 0.01;
 const SCROLL_STOP_DEBOUNCE_MS = 200;
-const SERIES_LINES_SCROLL_STOP_MS = 1000;
 
 function hashId(id: string): number {
   let h = 0;
@@ -193,6 +193,7 @@ function App() {
   const objectUrlsRef = useRef<Map<string, string>>(new Map());
   const imageBlobsRef = useRef<Map<string, Blob>>(new Map());
   const overlayUrlRef = useRef<string | null>(null);
+  const overlayPhotoIdRef = useRef<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [overlayPhotoId, setOverlayPhotoId] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
@@ -276,24 +277,41 @@ function App() {
     const today = todayStr();
     const photos: PersonalPhoto[] = records.map((r) => {
       const date = r.date > today ? today : r.date;
-      const image = URL.createObjectURL(r.previewBlob ?? r.imageBlob);
-      objectUrlsRef.current.set(r.id, image);
-      imageBlobsRef.current.set(r.id, r.imageBlob);
+      const showOnTimeline = r.showOnTimeline !== false;
+      if (showOnTimeline) {
+        const image = URL.createObjectURL(r.previewBlob ?? r.imageBlob);
+        objectUrlsRef.current.set(r.id, image);
+        imageBlobsRef.current.set(r.id, r.imageBlob);
+        return {
+          id: r.id,
+          title: r.title,
+          date,
+          image,
+          offsetXDays: r.offsetXDays ?? 0,
+          offsetY: r.offsetY ?? 0,
+          laneIndex: r.laneIndex,
+          note: r.note,
+          showOnTimeline: true,
+          seriesId: r.seriesId,
+        };
+      }
       return {
         id: r.id,
         title: r.title,
         date,
-        image,
+        image: "",
         offsetXDays: r.offsetXDays ?? 0,
         offsetY: r.offsetY ?? 0,
+        laneIndex: r.laneIndex,
         note: r.note,
-        showOnTimeline: r.showOnTimeline !== false,
+        showOnTimeline: false,
         seriesId: r.seriesId,
       };
     });
     setPersonalPhotos(photos);
 
     for (const r of records) {
+      if (r.showOnTimeline === false) continue;
       if (r.previewBlob) continue;
       try {
         const previewBlob = await generatePreviewBlob(r.imageBlob);
@@ -403,6 +421,22 @@ function App() {
     };
   }, []);
 
+  const loadSecondaryPhotoBlob = useCallback(async (id: string) => {
+    if (imageBlobsRef.current.has(id)) return;
+    const record = await getPhoto(id);
+    if (!record) return;
+    const url = URL.createObjectURL(record.imageBlob);
+    objectUrlsRef.current.set(id, url);
+    imageBlobsRef.current.set(id, record.imageBlob);
+    setPersonalPhotos((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, image: url } : p))
+    );
+  }, []);
+
+  useEffect(() => {
+    overlayPhotoIdRef.current = overlayPhotoId;
+  }, [overlayPhotoId]);
+
   useEffect(() => {
     if (overlayUrlRef.current) {
       URL.revokeObjectURL(overlayUrlRef.current);
@@ -415,6 +449,19 @@ function App() {
         overlayUrlRef.current = url;
         setOverlayUrl(url);
       } else {
+        const id = overlayPhotoId;
+        getPhoto(id).then((record) => {
+          if (!record || overlayPhotoIdRef.current !== id) return;
+          const blob = imageBlobsRef.current.get(id);
+          if (blob) return;
+          const url = URL.createObjectURL(record.imageBlob);
+          imageBlobsRef.current.set(id, record.imageBlob);
+          overlayUrlRef.current = url;
+          setOverlayUrl(url);
+          setPersonalPhotos((prev) =>
+            prev.map((p) => (p.id === id ? { ...p, image: url } : p))
+          );
+        });
         setOverlayUrl(null);
       }
     } else {
@@ -427,6 +474,24 @@ function App() {
       }
     };
   }, [overlayPhotoId]);
+
+  useEffect(() => {
+    if (!overlayPhotoId) return;
+    const current = personalPhotos.find((p) => p.id === overlayPhotoId);
+    if (!current) return;
+    const dayIds = personalPhotos
+      .filter((p) => p.date === current.date)
+      .map((p) => p.id);
+    const seriesIds = current.seriesId
+      ? personalPhotos
+          .filter((p) => p.seriesId === current.seriesId)
+          .map((p) => p.id)
+      : [];
+    const toLoad = [...new Set([...dayIds, ...seriesIds])].filter(
+      (id) => !imageBlobsRef.current.has(id)
+    );
+    toLoad.forEach((id) => loadSecondaryPhotoBlob(id));
+  }, [overlayPhotoId, personalPhotos, loadSecondaryPhotoBlob]);
 
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
@@ -462,20 +527,7 @@ function App() {
         });
       }
     };
-    const onScrollActivity = () => {
-      if (seriesLinesScrollStopTimerRef.current) {
-        clearTimeout(seriesLinesScrollStopTimerRef.current);
-        seriesLinesScrollStopTimerRef.current = null;
-      }
-      setSeriesLinesData([]);
-      setSeriesLinesScrollStopped(false);
-      seriesLinesScrollStopTimerRef.current = setTimeout(() => {
-        seriesLinesScrollStopTimerRef.current = null;
-        setSeriesLinesScrollStopped(true);
-      }, SERIES_LINES_SCROLL_STOP_MS);
-    };
     const schedule = () => {
-      onScrollActivity();
       if (scrollStopTimerRef.current) clearTimeout(scrollStopTimerRef.current);
       scrollStopTimerRef.current = setTimeout(() => {
         scrollStopTimerRef.current = null;
@@ -495,10 +547,6 @@ function App() {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onMove);
       if (scrollStopTimerRef.current) clearTimeout(scrollStopTimerRef.current);
-      if (seriesLinesScrollStopTimerRef.current) {
-        clearTimeout(seriesLinesScrollStopTimerRef.current);
-        seriesLinesScrollStopTimerRef.current = null;
-      }
     };
   }, []);
 
@@ -538,13 +586,6 @@ function App() {
     [hoveredSeriesId, personalPhotos]
   );
 
-  const [seriesLinesData, setSeriesLinesData] = useState<
-    { id: string; path: string }[]
-  >([]);
-  const [seriesLinesScrollStopped, setSeriesLinesScrollStopped] =
-    useState(false);
-  const seriesLinesScrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.altKey) setAltHeld(true);
@@ -578,6 +619,11 @@ function App() {
       end: new Date(centerMs + halfMs),
     };
   }, [effectiveCenter, scale]);
+
+  const isTimelineEraArchive = useMemo(() => {
+    const year = effectiveCenter.getFullYear();
+    return year >= 1800 && year <= 1950;
+  }, [effectiveCenter]);
 
   const axisTicks = useMemo(() => {
     const { start, end } = axisDates;
@@ -657,87 +703,19 @@ function App() {
           xPx,
           offsetXDays,
           offsetY: active.offsetY,
+          laneIndex: photo.laneIndex ?? 0,
         };
       })
       .filter((p) => p.xPx >= -50 && p.xPx <= width + 50)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    const hasManualOffset = (p: (typeof withPosition)[0]) =>
-      Math.abs(p.offsetY) > EPS || Math.abs(p.offsetXDays) > EPS;
-    const autoLayout = withPosition.filter((p) => !hasManualOffset(p));
-    const manualLayout = withPosition.filter(hasManualOffset);
-
-    const lanes: number[] = [];
-    const assignLane = (p: (typeof withPosition)[0]): number => {
-      const cardWidthPx = (CARD_WIDTH_PERCENT / 100) * width;
-      for (let i = 0; ; i++) {
-        const lastX = lanes[i];
-        const overlaps =
-          lastX !== undefined && Math.abs(p.xPx - lastX) < cardWidthPx;
-        if (!overlaps) {
-          lanes[i] = p.xPx;
-          return i;
-        }
-      }
-    };
-
-    return [
-      ...autoLayout.map((p) => ({ ...p, laneIndex: assignLane(p) })),
-      ...manualLayout.map((p) => ({ ...p, laneIndex: 0, isManual: true })),
-    ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    return withPosition;
   }, [
     photosForTimeline,
     layoutInfo,
     scale,
     axisDates,
     pendingOffsets,
-  ]);
-
-  useLayoutEffect(() => {
-    if (!hoveredSeriesId || !layoutInfo || !seriesLinesScrollStopped) {
-      setSeriesLinesData([]);
-      return;
-    }
-    const seriesPhotos = positionedPersonal.filter(
-      (p) => p.seriesId === hoveredSeriesId
-    );
-    if (seriesPhotos.length < 2) {
-      setSeriesLinesData([]);
-      return;
-    }
-    const tl = timelineRef.current;
-    if (!tl) {
-      setSeriesLinesData([]);
-      return;
-    }
-    const tlRect = tl.getBoundingClientRect();
-    const sorted = [...seriesPhotos].sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-    const lines: { id: string; path: string }[] = [];
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const cardA = personalCardRefs.current.get(sorted[i].id);
-      const cardB = personalCardRefs.current.get(sorted[i + 1].id);
-      if (!cardA || !cardB) continue;
-      const rectA = cardA.getBoundingClientRect();
-      const rectB = cardB.getBoundingClientRect();
-      const ax = rectA.left - tlRect.left + rectA.width / 2;
-      const ay = rectA.bottom - tlRect.top;
-      const bx = rectB.left - tlRect.left + rectB.width / 2;
-      const by = rectB.bottom - tlRect.top;
-      const midY = Math.min(ay, by) - 50;
-      const path = `M ${ax} ${ay} Q ${(ax + bx) / 2} ${midY} ${bx} ${by}`;
-      lines.push({
-        id: `${sorted[i].id}-${sorted[i + 1].id}`,
-        path,
-      });
-    }
-    setSeriesLinesData(lines);
-  }, [
-    hoveredSeriesId,
-    positionedPersonal,
-    layoutInfo,
-    seriesLinesScrollStopped,
   ]);
 
   /** Use stored laneIndex — never recalculate (assigned at ingest) */
@@ -965,13 +943,12 @@ function App() {
     const axis = axisRef.current;
     if (!timeline || !layoutInfo) return;
 
-    const { width, axisY } = layoutInfo;
+    const { width } = layoutInfo;
     const tlRect = timeline.getBoundingClientRect();
     const axisRect = axis!.getBoundingClientRect();
     const axisYActual = axisRect.top - tlRect.top + axisRect.height / 2;
 
     const lines: { id: string; path: string; totalLength: number; lineVariant?: "normal" | "dim-10y" | "dim-5y" }[] = [];
-
     const rangeDays = scaleMeta[scale].rangeDays;
     const pxPerDay = width / rangeDays;
     const axisStart = axisDates.start;
@@ -1082,58 +1059,76 @@ function App() {
     imageBlobsRef.current.set(id, file);
     generatePreviewBlob(file)
       .then((previewBlob) => {
-        const record: PhotoRecord = {
-          id,
-          title: caption || "Фото",
-          date: safeDate,
-          type: "personal",
-          imageBlob: file,
-          previewBlob,
-          offsetY: 0,
-          offsetXDays: 0,
-        };
-        return savePhoto(record).then(() => {
-          const image = URL.createObjectURL(previewBlob);
-          objectUrlsRef.current.set(id, image);
-          setPersonalPhotos((prev) => [
-            ...prev,
-            {
-              id,
-              title: record.title,
-              date: record.date,
-              image,
-              offsetXDays: 0,
-              offsetY: 0,
-              note: record.note,
-            },
+        return getAllPhotos().then((all) => {
+          const newRecord: PhotoRecord = {
+            id,
+            title: caption || "Фото",
+            date: safeDate,
+            type: "personal",
+            imageBlob: file,
+            previewBlob,
+            offsetY: 0,
+            offsetXDays: 0,
+          };
+          const withLanes = assignPersonalLaneIndex([
+            ...all,
+            { ...newRecord, showOnTimeline: true },
           ]);
+          const assigned = withLanes.find((r) => r.id === id);
+          newRecord.laneIndex = assigned?.laneIndex ?? 0;
+          return savePhoto(newRecord).then(() => {
+            const image = URL.createObjectURL(previewBlob);
+            objectUrlsRef.current.set(id, image);
+            setPersonalPhotos((prev) => [
+              ...prev,
+              {
+                id,
+                title: newRecord.title,
+                date: newRecord.date,
+                image,
+                offsetXDays: 0,
+                offsetY: 0,
+                laneIndex: newRecord.laneIndex,
+                note: newRecord.note,
+              },
+            ]);
+          });
         });
       })
       .catch(() => {
-        const record: PhotoRecord = {
-          id,
-          title: caption || "Фото",
-          date: safeDate,
-          type: "personal",
-          imageBlob: file,
-          offsetY: 0,
-          offsetXDays: 0,
-        };
-        savePhoto(record).then(() => {
-          const image = URL.createObjectURL(file);
-          objectUrlsRef.current.set(id, image);
-          setPersonalPhotos((prev) => [
-            ...prev,
-            {
-              id,
-              title: record.title,
-              date: record.date,
-              image,
-              offsetXDays: 0,
-              offsetY: 0,
-              note: record.note,
-            },
+        getAllPhotos().then((all) => {
+          const newRecord: PhotoRecord = {
+            id,
+            title: caption || "Фото",
+            date: safeDate,
+            type: "personal",
+            imageBlob: file,
+            offsetY: 0,
+            offsetXDays: 0,
+          };
+          const withLanes = assignPersonalLaneIndex([
+            ...all,
+            { ...newRecord, showOnTimeline: true },
           ]);
+          const assigned = withLanes.find((r) => r.id === id);
+          newRecord.laneIndex = assigned?.laneIndex ?? 0;
+          savePhoto(newRecord).then(() => {
+            const image = URL.createObjectURL(file);
+            objectUrlsRef.current.set(id, image);
+            setPersonalPhotos((prev) => [
+              ...prev,
+              {
+                id,
+                title: newRecord.title,
+                date: newRecord.date,
+                image,
+                offsetXDays: 0,
+                offsetY: 0,
+                laneIndex: newRecord.laneIndex,
+                note: newRecord.note,
+              },
+            ]);
+          });
         });
       });
   };
@@ -1336,66 +1331,84 @@ function App() {
       imageBlobsRef.current.set(id, file);
       generatePreviewBlob(file)
         .then((previewBlob) => {
-          const record: PhotoRecord = {
-            id,
-            title: "Фото",
-            date: safeDate,
-            type: "personal",
-            imageBlob: file,
-            previewBlob,
-            offsetY: 0,
-            offsetXDays: 0,
-            showOnTimeline: false,
-          };
-          return savePhoto(record).then(() => {
-            const image = URL.createObjectURL(previewBlob);
-            objectUrlsRef.current.set(id, image);
-            setPersonalPhotos((prev) => [
-              ...prev,
-              {
-                id,
-                title: record.title,
-                date: record.date,
-                image,
-                offsetXDays: 0,
-                offsetY: 0,
-                note: record.note,
-                showOnTimeline: false,
-              },
+          return getAllPhotos().then((all) => {
+            const newRecord: PhotoRecord = {
+              id,
+              title: "Фото",
+              date: safeDate,
+              type: "personal",
+              imageBlob: file,
+              previewBlob,
+              offsetY: 0,
+              offsetXDays: 0,
+              showOnTimeline: false,
+            };
+            const withLanes = assignPersonalLaneIndex([
+              ...all,
+              { ...newRecord, showOnTimeline: true },
             ]);
-            setOverlayPhotoId(id);
-            setOverlayUrl(image);
+            const assigned = withLanes.find((r) => r.id === id);
+            newRecord.laneIndex = assigned?.laneIndex ?? 0;
+            return savePhoto(newRecord).then(() => {
+              const image = URL.createObjectURL(previewBlob);
+              objectUrlsRef.current.set(id, image);
+              setPersonalPhotos((prev) => [
+                ...prev,
+                {
+                  id,
+                  title: newRecord.title,
+                  date: newRecord.date,
+                  image,
+                  offsetXDays: 0,
+                  offsetY: 0,
+                  laneIndex: newRecord.laneIndex,
+                  note: newRecord.note,
+                  showOnTimeline: false,
+                },
+              ]);
+              setOverlayPhotoId(id);
+              setOverlayUrl(image);
+            });
           });
         })
         .catch(() => {
-          const record: PhotoRecord = {
-            id,
-            title: "Фото",
-            date: safeDate,
-            type: "personal",
-            imageBlob: file,
-            offsetY: 0,
-            offsetXDays: 0,
-            showOnTimeline: false,
-          };
-          savePhoto(record).then(() => {
-            const image = URL.createObjectURL(file);
-            objectUrlsRef.current.set(id, image);
-            setPersonalPhotos((prev) => [
-              ...prev,
-              {
-                id,
-                title: record.title,
-                date: record.date,
-                image,
-                offsetXDays: 0,
-                offsetY: 0,
-                note: record.note,
-                showOnTimeline: false,
-              },
+          getAllPhotos().then((all) => {
+            const newRecord: PhotoRecord = {
+              id,
+              title: "Фото",
+              date: safeDate,
+              type: "personal",
+              imageBlob: file,
+              offsetY: 0,
+              offsetXDays: 0,
+              showOnTimeline: false,
+            };
+            const withLanes = assignPersonalLaneIndex([
+              ...all,
+              { ...newRecord, showOnTimeline: true },
             ]);
-            setOverlayPhotoId(id);
-            setOverlayUrl(image);
+            const assigned = withLanes.find((r) => r.id === id);
+            newRecord.laneIndex = assigned?.laneIndex ?? 0;
+            savePhoto(newRecord).then(() => {
+              const image = URL.createObjectURL(file);
+              objectUrlsRef.current.set(id, image);
+              setPersonalPhotos((prev) => [
+                ...prev,
+                {
+                  id,
+                  title: newRecord.title,
+                  date: newRecord.date,
+                  image,
+                  offsetXDays: 0,
+                  offsetY: 0,
+                  laneIndex: newRecord.laneIndex,
+                  note: newRecord.note,
+                  showOnTimeline: false,
+                },
+              ]);
+              setOverlayPhotoId(id);
+              setOverlayUrl(image);
+            });
           });
         });
     },
@@ -1681,14 +1694,14 @@ function App() {
 
       <main
         ref={timelineRef}
-        className={`timeline ${isDragging ? "timeline-dragging" : ""}`}
+        className={`timeline ${isDragging ? "timeline-dragging" : ""} ${isTimelineEraArchive ? "timeline-era-archive" : ""}`.trim()}
         onMouseDown={onTimelineMouseDown}
       >
-        <div ref={axisRef} className="axis">
+        <div ref={axisRef} className="axis timelineAxis">
           {axisTicks.map((t) => (
             <div
               key={t.date.getTime()}
-              className={`axis-tick axis-tick-${t.isMajor ? "major" : "minor"}`}
+              className={`axis-tick timelineTick axis-tick-${t.isMajor ? "major" : "minor"}`}
               style={{ left: `${t.percent}%` }}
             />
           ))}
@@ -1703,21 +1716,6 @@ function App() {
           </span>
         </div>
 
-        {seriesLinesData.length > 0 && (
-          <svg
-            className="series-lines-overlay"
-            aria-hidden
-            style={{ pointerEvents: "none" }}
-          >
-            {seriesLinesData.map((line) => (
-              <path
-                key={line.id}
-                d={line.path}
-                className="series-line-path"
-              />
-            ))}
-          </svg>
-        )}
         <svg className="timeline-lines-overlay" aria-hidden>
           {linesData.map((line) => (
             <MarkerLink
@@ -1801,7 +1799,7 @@ function App() {
             />
             {!linkingMode && (
               <div
-                className="historical-zone"
+                className={`historical-zone ${scale !== "10y" && scale !== "5y" ? "historical-zone-all-color" : ""}`.trim()}
                 style={{
                   position: "absolute",
                   left: 0,
@@ -1828,6 +1826,7 @@ function App() {
                 mainEventAnimatedIds={mainEventAnimatedIds}
                 shouldAnimateMain={scale === "10y" || scale === "5y"}
                 liftedHistId={liftedHistId}
+                isTimelineEraArchive={isTimelineEraArchive}
               />
               </div>
             )}

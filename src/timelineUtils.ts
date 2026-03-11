@@ -33,3 +33,27 @@ export function computeLinePath(
   const totalLength = verticalDist + horizontalDist;
   return { path, totalLength };
 }
+
+/**
+ * Deterministic tilt for archival effect (XIX century).
+ * Three-tier distribution: 70% nearly flat (-0.3°..+0.3°), 25% moderate (-0.7°..+0.7°), 5% noticeable (-1.2°..+1.2°).
+ */
+export function getCardTiltFromId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  }
+  const abs = Math.abs(h);
+  const r = (abs % 10000) / 10000;
+  const r2 = ((abs >>> 4) % 10000) / 10000; // different "random" value for angle within tier
+
+  let tilt: number;
+  if (r < 0.7) {
+    tilt = (r2 - 0.5) * 0.6;
+  } else if (r < 0.95) {
+    tilt = (r2 - 0.5) * 1.4;
+  } else {
+    tilt = (r2 - 0.5) * 2.4;
+  }
+  return tilt;
+}

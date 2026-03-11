@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { HistoricalEvent } from "./history/types";
+import { getCardTiltFromId } from "./timelineUtils";
 import { MAX_LANES, CANONICAL_WIDTH_DAYS } from "./history/laneAssignment";
 
 /** Resolve image URL: HistoryPics > cached > previewBlob > thumbnailUrl */
@@ -90,6 +91,7 @@ type HistoricalCardProps = {
   hasAnimated?: boolean;
   shouldAnimateMain?: boolean;
   isLifted?: boolean;
+  isTimelineEraArchive?: boolean;
 };
 
 function HistoricalCard({
@@ -105,6 +107,7 @@ function HistoricalCard({
   hasAnimated = false,
   shouldAnimateMain = false,
   isLifted = false,
+  isTimelineEraArchive = false,
 }: HistoricalCardProps) {
   const imageUrl = useResolvedImageUrl(event, getLocalImageUrl, historicalImageUrls);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -192,11 +195,16 @@ function HistoricalCard({
       }}
     >
       <div
-        className="card card-historical"
+        className={`card card-historical ${isTimelineEraArchive && !isMainEvent ? "timelineCard" : ""}`.trim()}
         ref={(el) => {
           if (el) cardRefsMap.current.set(event.id, el);
           else cardRefsMap.current.delete(event.id);
         }}
+        style={
+          isTimelineEraArchive && !isMainEvent
+            ? { ["--card-tilt" as string]: `${getCardTiltFromId(event.id)}deg` }
+            : undefined
+        }
       >
         <div
           className={`cardImage cardImage-historical ${isVintageEra ? "hist-image-vintage" : ""}`.trim()}
@@ -244,6 +252,8 @@ type HistoricalLayerProps = {
   shouldAnimateMain?: boolean;
   /** Event lifted to front after 500ms hover (hidden behind others) */
   liftedHistId?: string | null;
+  /** Timeline center in 1800–1950: archival tilt for non-main cards */
+  isTimelineEraArchive?: boolean;
 };
 
 export function HistoricalLayer({
@@ -260,6 +270,7 @@ export function HistoricalLayer({
   mainEventAnimatedIds,
   shouldAnimateMain = false,
   liftedHistId = null,
+  isTimelineEraArchive = false,
 }: HistoricalLayerProps) {
   const isEffectActive = mainEffectMode !== "none";
   const sortedEvents =
@@ -319,6 +330,7 @@ export function HistoricalLayer({
             hasAnimated={mainEventAnimatedIds?.has(event.id) ?? false}
             shouldAnimateMain={shouldAnimateMain}
             isLifted={liftedHistId === event.id}
+            isTimelineEraArchive={isTimelineEraArchive}
           />
         );
       })}

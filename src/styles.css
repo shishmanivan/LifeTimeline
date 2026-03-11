@@ -94,6 +94,38 @@ body {
   overflow: visible;
 }
 
+/* Archive era (1800–1950): archival tilt for historical non-main cards only */
+.timeline-era-archive .timelineCard {
+  transform: rotate(var(--card-tilt));
+}
+.timeline-era-archive .event-historical.hist--dim-10y .timelineCard {
+  transform: scale(0.9) rotate(var(--card-tilt));
+}
+.timeline-era-archive .event-historical.hist--main .timelineCard {
+  transform: none;
+}
+.timeline-era-archive .event:hover .timelineCard {
+  transform: rotate(var(--card-tilt)) translateY(-2px);
+}
+.timeline-era-archive .event-historical.hist--dim-10y:hover .timelineCard {
+  transform: scale(0.9) rotate(var(--card-tilt)) translateY(-2px);
+}
+.timeline-era-archive .event-historical.hist--main:hover .timelineCard {
+  transform: translateY(-2px);
+}
+
+/* Archive era: subtle typographic/ink feel for axis */
+.timeline-era-archive .timelineAxis {
+  height: 3px;
+  margin-top: -1.5px;
+  background: #2f2f2f;
+  opacity: 0.92;
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.25);
+}
+.timeline-era-archive .timelineTick {
+  opacity: 0.85;
+}
+
 .axis-tick {
   position: absolute;
   width: 1px;
@@ -139,17 +171,33 @@ body {
   z-index: 1;
 }
 
-/* Unified museum-style card: personal + historical */
+/* Unified paper-style card: personal + historical */
 .event .card {
   display: flex;
   flex-direction: column;
   height: auto;
   padding: 0;
-  border: 1px solid #222;
+  border: none;
+  border-radius: 8px;
   background: #fff;
   width: 120px;
   overflow: hidden;
   position: relative;
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.12),
+    0 2px 4px rgba(0, 0, 0, 0.08);
+  transition:
+    transform 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.event:hover .card,
+.event-historical.hist--dim-5y:hover .card,
+.event-historical.hist--main:hover .card {
+  transform: translateY(-2px);
+  box-shadow:
+    0 10px 20px rgba(0, 0, 0, 0.16),
+    0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 /* Personal: above axis */
@@ -203,12 +251,14 @@ body {
   background: rgba(0, 0, 0, 0.06);
 }
 
-/* Text block: tight padding, no fixed height */
+/* Text block */
 .cardTitle {
-  padding: 4px 6px 4px;
+  padding: 10px 12px;
   margin: 0;
-  font-size: 12px;
-  line-height: 1.15;
+  font-size: 13px;
+  line-height: 1.3;
+  font-weight: 500;
+  color: #222;
   white-space: normal;
   overflow: visible;
   display: block;
@@ -367,8 +417,7 @@ body {
 
 
 .card-historical {
-  border-color: rgba(0, 0, 0, 0.35);
-  border-style: dashed;
+  /* Same paper style as base .event .card */
 }
 
 .card-image-clickable {
@@ -507,20 +556,20 @@ body {
   display: block;
 }
 
-/* Personal: compact padding */
+/* Personal: inherit from .cardTitle */
 .titlePersonal {
-  padding: 4px 6px 4px;
+  padding: 10px 12px;
   margin: 0;
 }
 
-/* Historical: max 4 lines, height auto, no empty space if fewer lines */
+/* Historical: max 4 lines, inherit text style from .cardTitle */
 .titleHistorical {
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
   height: auto;
-  padding: 4px 6px 4px;
+  padding: 10px 12px;
   margin: 0;
 }
 
@@ -530,54 +579,69 @@ body {
   background: transparent;
 }
 
-/* 1960s and earlier: desaturate color images (flags etc.) to match B&W aesthetic */
+/* 1960s and earlier: desaturate color images (flags etc.) to match B&W aesthetic. Only at 10y/5y. */
 .cardImage-historical.hist-image-vintage img {
   filter: grayscale(0.8) saturate(0.35);
 }
 
-/* History hierarchy: main vs non-main by scale (10y, 5y). Filters on image only. */
+/* At 2y and smaller: all images color, no grayscale */
+.historical-zone-all-color .cardImage-historical.hist-image-vintage img {
+  filter: none;
+}
+
+/* History hierarchy: main vs non-main by scale (10y, 5y). Main = color, ordinary = grayscale. */
 .event-historical.hist--main .card {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-  border-color: #333;
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.12),
+    0 2px 4px rgba(0, 0, 0, 0.08);
 }
 .event-historical.hist-main-10y .card {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.12),
+    0 2px 4px rgba(0, 0, 0, 0.08);
 }
 .event-historical.hist-main-10y .cardTitle {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 13px;
 }
 .event-historical.hist-main-5y .card {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.12),
+    0 2px 4px rgba(0, 0, 0, 0.08);
 }
 .event-historical.hist-main-5y .cardTitle {
-  font-weight: 600;
+  font-weight: 500;
 }
 .event-historical.hist--main-open .card {
-  border-top-width: 2px;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12);
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.14),
+    0 3px 6px rgba(0, 0, 0, 0.1);
 }
 .event-historical.hist--dim-10y .card {
-  box-shadow: none;
-  border-color: #e0e0e0;
+  transform: scale(0.9);
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.08),
+    0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.event-historical.hist--dim-10y:hover .card {
+  transform: scale(0.9) translateY(-2px);
 }
 .event-historical.hist--dim-10y .cardImage-historical img {
-  filter: grayscale(100%) contrast(0.85) saturate(0.08);
+  filter: grayscale(100%);
 }
 .event-historical.hist--dim-10y .cardTitle {
-  color: #999;
+  color: #666;
 }
 .event-historical.hist--dim-5y .card {
-  box-shadow: none;
-  border-color: #ddd;
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.08),
+    0 1px 3px rgba(0, 0, 0, 0.06);
 }
 .event-historical.hist--dim-5y .cardImage-historical img {
-  filter: grayscale(80%) saturate(0.18) contrast(0.9);
+  filter: grayscale(100%);
 }
 .event-historical.hist--dim-5y .cardTitle {
-  color: #777;
+  color: #666;
 }
 
 /* Historical event modal (lightbox) */
@@ -1064,6 +1128,13 @@ body {
   height: 64px;
   object-fit: cover;
   border-radius: 4px;
+}
+
+.personal-modal-series-thumb-placeholder {
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  background: #e8e8e8;
 }
 
 .personal-modal-series-thumb-date {

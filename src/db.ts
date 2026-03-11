@@ -2,7 +2,7 @@ import type { HistoricalEvent } from "./history/types";
 import { assignHistoricalLanes } from "./history/laneAssignment";
 
 const DB_NAME = "LifeTimelineDB";
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 const STORE_NAME = "photos";
 const HISTORICAL_STORE = "historicalEvents";
 const SERIES_STORE = "photoSeries";
@@ -21,6 +21,8 @@ export type PhotoRecord = {
   previewBlob?: Blob;
   offsetY?: number;
   offsetXDays?: number;
+  /** Lane index for timeline layout; assigned once, never recalculated */
+  laneIndex?: number;
   /** Post/description text, editable in modal */
   note?: string;
   /** If false, photo is hidden from timeline (only visible when browsing day) */
@@ -57,8 +59,57 @@ function openDB(): Promise<IDBDatabase> {
       if ((ev.newVersion ?? db.version) === 9 && !db.objectStoreNames.contains(SERIES_STORE)) {
         db.createObjectStore(SERIES_STORE, { keyPath: "id" });
       }
+      if ((ev.newVersion ?? db.version) === 10 && tx) {
+        migratePersonalLaneIndex(tx);
+      }
     };
   });
+}
+
+const CARD_WIDTH_DAYS = 6;
+
+export function assignPersonalLaneIndex(records: PhotoRecord[]): PhotoRecord[] {
+  const forTimeline = records.filter((r) => r.showOnTimeline !== false);
+  const sorted = [...forTimeline].sort((a, b) => {
+    const posA = new Date(a.date).getTime() + (a.offsetXDays ?? 0) * 24 * 60 * 60 * 1000;
+    const posB = new Date(b.date).getTime() + (b.offsetXDays ?? 0) * 24 * 60 * 60 * 1000;
+    return posA - posB;
+  });
+  const lanes: number[] = [];
+  const result = new Map<string, number>();
+  for (const r of sorted) {
+    const posDays = new Date(r.date).getTime() / (24 * 60 * 60 * 1000) + (r.offsetXDays ?? 0);
+    let lane = 0;
+    for (; ; lane++) {
+      const last = lanes[lane];
+      const overlaps = last !== undefined && Math.abs(posDays - last) < CARD_WIDTH_DAYS;
+      if (!overlaps) {
+        lanes[lane] = posDays;
+        result.set(r.id, lane);
+        break;
+      }
+    }
+  }
+  return records.map((r) =>
+    result.has(r.id) ? { ...r, laneIndex: result.get(r.id)! } : r
+  );
+}
+
+function migratePersonalLaneIndex(tx: IDBTransaction): void {
+  const store = tx.objectStore(STORE_NAME);
+  const req = store.getAll();
+  req.onsuccess = () => {
+    const raw = (req.result || []) as PhotoRecord[];
+    const needLane = raw.filter((r) => r.laneIndex === undefined && r.showOnTimeline !== false);
+    if (needLane.length === 0) return;
+    const withLanes = assignPersonalLaneIndex(raw);
+    for (const r of withLanes) {
+      if (r.laneIndex !== undefined) store.put(r);
+    }
+    if (import.meta.env.DEV) {
+      console.log(`[photos] assigned laneIndex to ${needLane.length} personal photos`);
+    }
+  };
 }
 
 export async function savePhoto(photo: PhotoRecord): Promise<void> {

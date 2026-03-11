@@ -558,11 +558,15 @@ export function PersonalPhotoModal({
                   className={`personal-modal-series-thumb ${p.id === photo.id ? "personal-modal-series-thumb-active" : ""}`}
                   onClick={() => p.id !== photo.id && onNavigate(p.id)}
                 >
-                  <img
-                    src={p.image}
-                    alt={p.title}
-                    className="personal-modal-series-thumb-img"
-                  />
+                  {p.image ? (
+                    <img
+                      src={p.image}
+                      alt={p.title}
+                      className="personal-modal-series-thumb-img"
+                    />
+                  ) : (
+                    <div className="personal-modal-series-thumb-placeholder" />
+                  )}
                   <span className="personal-modal-series-thumb-date">
                     {formatSeriesDate(p.date)}
                   </span>
