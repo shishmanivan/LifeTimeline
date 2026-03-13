@@ -48,17 +48,21 @@ type Scale = "30d" | "60d" | "90d" | "1y" | "2y" | "5y" | "10y";
 const scales: Scale[] = ["30d", "60d", "90d", "1y", "2y", "5y", "10y"];
 
 const scaleMeta: Record<Scale, { label: string; rangeDays: number }> = {
-  "30d": { label: "30 days", rangeDays: 30 },
-  "60d": { label: "60 days", rangeDays: 60 },
-  "90d": { label: "90 days", rangeDays: 90 },
-  "1y": { label: "1 year", rangeDays: 365 },
-  "2y": { label: "2 years", rangeDays: 730 },
-  "5y": { label: "5 years", rangeDays: 1825 },
-  "10y": { label: "10 years", rangeDays: 3650 },
+  "30d": { label: "30 дней", rangeDays: 30 },
+  "60d": { label: "60 дней", rangeDays: 60 },
+  "90d": { label: "90 дней", rangeDays: 90 },
+  "1y": { label: "1 год", rangeDays: 365 },
+  "2y": { label: "2 года", rangeDays: 730 },
+  "5y": { label: "5 лет", rangeDays: 1825 },
+  "10y": { label: "10 лет", rangeDays: 3650 },
 };
 
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 const LANE_HEIGHT = 140;
+const PERSONAL_BASE_Y_OFFSET = 120;
+const PERSONAL_LANE_HEIGHT = 160;
+/** Card: width 120, image 4:3 = 90, title ~40 */
+const PERSONAL_CARD_HEIGHT = 130;
 const EPS = 0.01;
 const SCROLL_STOP_DEBOUNCE_MS = 200;
 
@@ -117,6 +121,90 @@ type AddPhotoModalProps = {
 };
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const LAYERS = [
+  { id: "main", title: "Основные мировые события" },
+  { id: "culture", title: "Культура и искусство" },
+] as const;
+
+function getEventLayerId(event: { sourceFile: string }): string {
+  const f = event.sourceFile.toLowerCase();
+  return f.includes("culture") || f.includes("культура") ? "culture" : "main";
+}
+
+type GotoDateModalProps = {
+  initialDate?: string;
+  onClose: () => void;
+  onGoToDate: (dateStr: string) => void;
+};
+
+type LayersModalProps = {
+  visibleLayers: Set<string>;
+  onToggle: (layerId: string) => void;
+  onClose: () => void;
+};
+
+function LayersModal({ visibleLayers, onToggle, onClose }: LayersModalProps) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2 className="modal-title">Слои</h2>
+        <div className="modal-field" style={{ flexDirection: "column", gap: 8 }}>
+          {LAYERS.map((layer) => (
+            <label key={layer.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={visibleLayers.has(layer.id)}
+                onChange={() => onToggle(layer.id)}
+              />
+              <span>{layer.title}</span>
+            </label>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>
+            Закрыть
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GotoDateModal({ initialDate = todayStr(), onClose, onGoToDate }: GotoDateModalProps) {
+  const [date, setDate] = useState(initialDate);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onGoToDate(date);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2 className="modal-title">Перейти к дате</h2>
+        <form onSubmit={handleSubmit}>
+          <div className="modal-field">
+            <label>Дата</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              max={todayStr()}
+              autoFocus
+            />
+          </div>
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>
+              Отмена
+            </button>
+            <button type="submit">Перейти</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 function AddPhotoModal({ onClose, onSubmit }: AddPhotoModalProps) {
   const [file, setFile] = useState<File | null>(null);
@@ -195,6 +283,11 @@ function App() {
   const overlayUrlRef = useRef<string | null>(null);
   const overlayPhotoIdRef = useRef<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [gotoDateModalOpen, setGotoDateModalOpen] = useState(false);
+  const [layersModalOpen, setLayersModalOpen] = useState(false);
+  const [visibleLayers, setVisibleLayers] = useState<Set<string>>(
+    () => new Set(LAYERS.map((l) => l.id))
+  );
   const [overlayPhotoId, setOverlayPhotoId] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
   const [overlayEditMode, setOverlayEditMode] = useState(false);
@@ -718,6 +811,45 @@ function App() {
     pendingOffsets,
   ]);
 
+  const seriesBadgePosition = useMemo((): { left: number; top: number; align: "above" | "left" | "right" } | null => {
+    if (!hoveredSeriesId || !layoutInfo) return null;
+    const seriesPhotos = positionedPersonal.filter((p) => p.seriesId === hoveredSeriesId);
+    if (seriesPhotos.length === 0) return null;
+    const baseY = layoutInfo.axisY - PERSONAL_BASE_Y_OFFSET;
+    const SAFE_TOP = 48;
+    const GAP = 12;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minCardTop = Infinity;
+    let maxCardBottom = -Infinity;
+    for (const p of seriesPhotos) {
+      const offsetY = getActiveOffsets(p.id).offsetY;
+      const y = baseY - (p.laneIndex ?? 0) * PERSONAL_LANE_HEIGHT + offsetY;
+      const cardTop = y - PERSONAL_CARD_HEIGHT;
+      const cardBottom = y;
+      minX = Math.min(minX, p.xPx - 60);
+      maxX = Math.max(maxX, p.xPx + 60);
+      minCardTop = Math.min(minCardTop, cardTop);
+      maxCardBottom = Math.max(maxCardBottom, cardBottom);
+    }
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minCardTop + maxCardBottom) / 2;
+    const spaceAbove = minCardTop - GAP;
+    if (spaceAbove >= SAFE_TOP) {
+      return { left: centerX, top: minCardTop - GAP, align: "above" };
+    }
+    const leftEdge = minX - GAP;
+    const rightEdge = maxX + GAP;
+    const { width } = layoutInfo;
+    if (leftEdge >= 80) {
+      return { left: leftEdge, top: centerY, align: "left" };
+    }
+    if (rightEdge <= width - 80) {
+      return { left: rightEdge, top: centerY, align: "right" as const };
+    }
+    return { left: centerX, top: Math.max(SAFE_TOP, centerY - 20), align: "above" };
+  }, [hoveredSeriesId, layoutInfo, positionedPersonal, pendingOffsets, personalPhotos]);
+
   /** Use stored laneIndex — never recalculate (assigned at ingest) */
   const historicalWithLanes = useMemo(() => {
     return historicalEvents.map((e) => ({
@@ -801,9 +933,23 @@ function App() {
     axisDates,
   ]);
 
+  const visiblePositionedHistorical = useMemo(
+    () => positionedHistorical.filter((e) => visibleLayers.has(getEventLayerId(e))),
+    [positionedHistorical, visibleLayers]
+  );
+
+  const toggleLayer = useCallback((layerId: string) => {
+    setVisibleLayers((prev) => {
+      const next = new Set(prev);
+      if (next.has(layerId)) next.delete(layerId);
+      else next.add(layerId);
+      return next;
+    });
+  }, []);
+
   const histIdsSet = useMemo(
-    () => new Set(positionedHistorical.map((e) => e.id)),
-    [positionedHistorical]
+    () => new Set(visiblePositionedHistorical.map((e) => e.id)),
+    [visiblePositionedHistorical]
   );
 
   const onHistoricalZoneMouseMove = useCallback(
@@ -874,7 +1020,7 @@ function App() {
 
   useLayoutEffect(() => {
     const personalIds = new Set(positionedPersonal.map((p) => p.id));
-    const histIds = new Set(positionedHistorical.map((e) => e.id));
+    const histIds = new Set(visiblePositionedHistorical.map((e) => e.id));
     const root = timelineRef.current;
     if (!root) return;
 
@@ -918,12 +1064,12 @@ function App() {
       const el = personalCardRefs.current.get(p.id);
       if (el) observer.observe(el);
     });
-    positionedHistorical.forEach((e) => {
+    visiblePositionedHistorical.forEach((e) => {
       const el = historicalCardRefs.current.get(e.id);
       if (el) observer.observe(el);
     });
     return () => observer.disconnect();
-  }, [positionedPersonal, positionedHistorical]);
+  }, [positionedPersonal, visiblePositionedHistorical]);
 
   useEffect(() => {
     if (scale !== "10y" && scale !== "5y") return;
@@ -959,6 +1105,7 @@ function App() {
       if (!visiblePhotoIds.has(photo.id)) continue;
       if (cardDragging === photo.id) continue;
       if (isDirty(photo.id)) continue;
+      if (hoveredSeriesId && (!photo.seriesId || photo.seriesId !== hoveredSeriesId)) continue;
       const card = personalCardRefs.current.get(photo.id);
       if (!card) continue;
 
@@ -983,7 +1130,7 @@ function App() {
 
     const mainMarkers: { id: string; xPx: number; yAxis: number; yCardTop: number; scale: "10y" | "5y" | "small" }[] = [];
 
-    for (const ev of positionedHistorical) {
+    for (const ev of visiblePositionedHistorical) {
       if (!visibleHistIds.has(ev.id)) continue;
       const card = historicalCardRefs.current.get(ev.id);
       if (!card) continue;
@@ -1032,7 +1179,7 @@ function App() {
     setMainMarkersData(mainMarkers);
   }, [
     positionedPersonal,
-    positionedHistorical,
+    visiblePositionedHistorical,
     visiblePhotoIds,
     visibleHistIds,
     layoutInfo,
@@ -1041,6 +1188,7 @@ function App() {
     pendingOffsets,
     cardDragging,
     mainEventIds,
+    hoveredSeriesId,
   ]);
 
   const resetLineAnimation = (id: string) => {
@@ -1608,12 +1756,26 @@ function App() {
         <div className="top-bar-right">
           <button
             type="button"
-            className="btn-add-photo"
+            className="top-bar-btn"
+            onClick={() => setGotoDateModalOpen(true)}
+          >
+            Перейти к дате
+          </button>
+          <button
+            type="button"
+            className="top-bar-btn"
+            onClick={() => setLayersModalOpen(true)}
+          >
+            Слои
+          </button>
+          <button
+            type="button"
+            className="top-bar-btn"
             onClick={() => setModalOpen(true)}
           >
             + Добавить фото
           </button>
-          <div className="scale">Scale: {scaleMeta[scale].label}</div>
+          <div className="scale">Масштаб: {scaleMeta[scale].label}</div>
         </div>
       </header>
 
@@ -1621,6 +1783,26 @@ function App() {
         <AddPhotoModal
           onClose={() => setModalOpen(false)}
           onSubmit={handleAddPhoto}
+        />
+      )}
+
+      {gotoDateModalOpen && (
+        <GotoDateModal
+          initialDate={centerDate.toISOString().slice(0, 10)}
+          onClose={() => setGotoDateModalOpen(false)}
+          onGoToDate={(dateStr) => {
+            const d = new Date(dateStr);
+            setCenterDate(clampCenterToToday(d, scale));
+            setGotoDateModalOpen(false);
+          }}
+        />
+      )}
+
+      {layersModalOpen && (
+        <LayersModal
+          visibleLayers={visibleLayers}
+          onToggle={toggleLayer}
+          onClose={() => setLayersModalOpen(false)}
         />
       )}
 
@@ -1715,6 +1897,25 @@ function App() {
             {formatAxisDate(axisDates.end, scale)}
           </span>
         </div>
+
+        {hoveredSeriesId && seriesMap[hoveredSeriesId] && seriesBadgePosition && (
+          <div
+            className="series-title-badge"
+            aria-hidden
+            style={{
+              left: `${seriesBadgePosition.left}px`,
+              top: `${seriesBadgePosition.top}px`,
+              transform:
+                seriesBadgePosition.align === "above"
+                  ? "translateX(-50%)"
+                  : seriesBadgePosition.align === "left"
+                    ? "translate(-100%, -50%)"
+                    : "translateY(-50%)",
+            }}
+          >
+            {seriesMap[hoveredSeriesId]}
+          </div>
+        )}
 
         <svg className="timeline-lines-overlay" aria-hidden>
           {linesData.map((line) => (
@@ -1812,7 +2013,7 @@ function App() {
                 onMouseLeave={onHistoricalZoneMouseLeave}
               >
                 <HistoricalLayer
-                events={positionedHistorical}
+                events={visiblePositionedHistorical}
                 axisY={layoutInfo.axisY}
                 cardRefsMap={historicalCardRefs}
                 getLocalImageUrl={getLocalImageUrl}

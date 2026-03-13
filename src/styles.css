@@ -47,22 +47,37 @@ body {
   gap: 16px;
 }
 
-.btn-add-photo {
-  padding: 6px 12px;
-  font-size: 12px;
-  border: 1px solid #111;
+.top-bar-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #222;
+  border: none;
+  border-radius: 8px;
   background: #fff;
   cursor: pointer;
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.12),
+    0 2px 4px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 120ms ease-out, transform 120ms ease-out;
 }
 
-.btn-add-photo:hover {
-  background: #f5f5f5;
+.top-bar-btn:hover {
+  box-shadow:
+    0 10px 20px rgba(0, 0, 0, 0.16),
+    0 4px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+
+.top-bar-btn:active {
+  transform: translateY(0);
 }
 
 .scale {
   font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 500;
+  color: #222;
+  letter-spacing: 0.02em;
 }
 
 .timeline {
@@ -1225,9 +1240,28 @@ body {
   background: rgba(255, 255, 255, 0.15);
 }
 
-/* Series hover: dim unrelated personal photos */
+/* Series title badge when hovering series (after 1s hold) */
+.series-title-badge {
+  position: absolute;
+  padding: 10px 18px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.12),
+    0 2px 4px rgba(0, 0, 0, 0.08);
+  font-size: 15px;
+  font-weight: 500;
+  color: #222;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 20;
+  transition: opacity 0.2s ease;
+}
+
+/* Series hover: hide unrelated personal photos (after 1s hold) */
 .event-personal.event-photo.event-photo-dimmed {
-  opacity: 0.35;
+  opacity: 0;
+  pointer-events: none;
   transition: opacity 0.2s ease;
 }
 
