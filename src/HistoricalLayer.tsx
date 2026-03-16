@@ -1,28 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { HistoricalEvent } from "./history/types";
 import { getCardTiltFromId } from "./timelineUtils";
 import { MAX_LANES, CANONICAL_WIDTH_DAYS } from "./history/laneAssignment";
 
-/** Resolve image URL: HistoryPics > cached > previewBlob > thumbnailUrl */
+/** Resolve image URL from local HistoryPics only. */
 export function useResolvedImageUrl(
   event: HistoricalEvent,
-  getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined,
-  historicalImageUrls?: Record<string, string>
+  getLocalImageUrl?: (e: {
+    date: string;
+    url: string;
+    sourceFile?: string;
+  }) => string | undefined
 ): string | undefined {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const local = getLocalImageUrl?.(event);
-  const cached = historicalImageUrls?.[event.id];
-  const thumb = event.thumbnailUrl;
-
-  useEffect(() => {
-    if (event.previewBlob && !local && !cached) {
-      const url = URL.createObjectURL(event.previewBlob);
-      setBlobUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }
-  }, [event.previewBlob, event.id, local, cached]);
-
-  return local ?? cached ?? blobUrl ?? thumb;
+  return getLocalImageUrl?.(event);
 }
 
 export type PositionedHistorical = HistoricalEvent & {
@@ -82,8 +72,11 @@ type HistoricalCardProps = {
   event: PositionedHistorical;
   cardRefsMap: React.MutableRefObject<Map<string, HTMLDivElement>>;
   top: number;
-  getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
-  historicalImageUrls?: Record<string, string>;
+  getLocalImageUrl?: (e: {
+    date: string;
+    url: string;
+    sourceFile?: string;
+  }) => string | undefined;
   isMainEvent?: boolean;
   mainEffectMode?: MainEffectMode;
   dimNonMain?: boolean;
@@ -99,7 +92,6 @@ function HistoricalCard({
   cardRefsMap,
   top,
   getLocalImageUrl,
-  historicalImageUrls,
   isMainEvent = false,
   mainEffectMode = "none",
   dimNonMain = true,
@@ -109,7 +101,7 @@ function HistoricalCard({
   isLifted = false,
   isTimelineEraArchive = false,
 }: HistoricalCardProps) {
-  const imageUrl = useResolvedImageUrl(event, getLocalImageUrl, historicalImageUrls);
+  const imageUrl = useResolvedImageUrl(event, getLocalImageUrl);
   const [imgLoaded, setImgLoaded] = useState(false);
 
   if (import.meta.env.DEV) {
@@ -223,7 +215,7 @@ function HistoricalCard({
             />
           )}
         </div>
-        <div className="cardTitle titleHistorical" title={event.summary ?? ""}>
+        <div className="cardTitle titleHistorical" title={event.title}>
           {event.title}
         </div>
       </div>
@@ -237,8 +229,11 @@ type HistoricalLayerProps = {
   cardRefsMap: React.MutableRefObject<Map<string, HTMLDivElement>>;
   /** When inside zone wrapper: use topRelativeToZone for positioning */
   insideZone?: boolean;
-  getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
-  historicalImageUrls?: Record<string, string>;
+  getLocalImageUrl?: (e: {
+    date: string;
+    url: string;
+    sourceFile?: string;
+  }) => string | undefined;
   /** At 10y/5y scale: main events emphasized, others dimmed. Main drawn on top. */
   mainEventIds?: Set<string>;
   mainEffectMode?: MainEffectMode;
@@ -262,7 +257,6 @@ export function HistoricalLayer({
   cardRefsMap,
   insideZone = true,
   getLocalImageUrl,
-  historicalImageUrls,
   mainEventIds,
   mainEffectMode = "none",
   dimNonMain = true,
@@ -322,7 +316,6 @@ export function HistoricalLayer({
             cardRefsMap={cardRefsMap}
             top={top}
             getLocalImageUrl={getLocalImageUrl}
-            historicalImageUrls={historicalImageUrls}
             isMainEvent={isMain}
             mainEffectMode={mainEffectMode}
             dimNonMain={dimNonMain}

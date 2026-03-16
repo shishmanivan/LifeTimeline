@@ -2,7 +2,7 @@ import type { HistoricalEvent } from "./history/types";
 import { assignHistoricalLanes } from "./history/laneAssignment";
 
 const DB_NAME = "LifeTimelineDB";
-const DB_VERSION = 10;
+const DB_VERSION = 13;
 const STORE_NAME = "photos";
 const HISTORICAL_STORE = "historicalEvents";
 const SERIES_STORE = "photoSeries";
@@ -61,6 +61,15 @@ function openDB(): Promise<IDBDatabase> {
       }
       if ((ev.newVersion ?? db.version) === 10 && tx) {
         migratePersonalLaneIndex(tx);
+      }
+      if ((ev.newVersion ?? db.version) === 11 && tx) {
+        /* v11: no-op, compatibility only */
+      }
+      if ((ev.newVersion ?? db.version) === 12 && tx) {
+        /* v12: no-op, compatibility only */
+      }
+      if ((ev.newVersion ?? db.version) === 13 && tx) {
+        migrateHistoricalRemoveDeprecatedFields(tx);
       }
     };
   });
@@ -285,14 +294,10 @@ const HISTORICAL_WHITELIST: (keyof HistoricalEvent)[] = [
   "url",
   "title",
   "lang",
-  "thumbnailUrl",
-  "previewBlob",
   "tags",
   "sourceFile",
   "sourceLine",
   "updatedAt",
-  "enrichVersion",
-  "summary",
   "importance",
   "ruUrl",
   "laneIndex",
@@ -308,8 +313,16 @@ function sanitizeHistoricalEvent(raw: Record<string, unknown>): HistoricalEvent 
     if ("lane" in raw && raw.lane !== undefined) legacy.lane = raw.lane;
     if ("manualPosition" in raw && raw.manualPosition !== undefined)
       legacy.manualPosition = raw.manualPosition;
+    if ("thumbnailUrl" in raw && raw.thumbnailUrl !== undefined)
+      legacy.thumbnailUrl = raw.thumbnailUrl;
+    if ("previewBlob" in raw && raw.previewBlob !== undefined)
+      legacy.previewBlob = "[blob]";
+    if ("summary" in raw && raw.summary !== undefined)
+      legacy.summary = "[removed]";
+    if ("enrichVersion" in raw && raw.enrichVersion !== undefined)
+      legacy.enrichVersion = raw.enrichVersion;
     if (Object.keys(legacy).length > 0) {
-      console.log("[history-debug] raw record had legacy layout fields", {
+      console.log("[history-debug] raw record had legacy historical fields", {
         id: raw.id,
         date: raw.date,
         ...legacy,
@@ -360,6 +373,29 @@ function migrateHistoricalLaneIndex(tx: IDBTransaction): void {
     }
     if (import.meta.env.DEV) {
       console.log(`[history] assigned laneIndex to ${withLanes.length} events`);
+    }
+  };
+}
+
+function migrateHistoricalRemoveDeprecatedFields(tx: IDBTransaction): void {
+  const store = tx.objectStore(HISTORICAL_STORE);
+  const req = store.getAll();
+  req.onsuccess = () => {
+    const raw = (req.result || []) as Record<string, unknown>[];
+    let cleaned = 0;
+    for (const r of raw) {
+      if (
+        "thumbnailUrl" in r ||
+        "previewBlob" in r ||
+        "summary" in r ||
+        "enrichVersion" in r
+      ) {
+        store.put(sanitizeHistoricalEvent(r));
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      console.log(`[history] removed deprecated historical fields from ${cleaned} records`);
     }
   };
 }

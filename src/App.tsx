@@ -19,7 +19,7 @@ import {
 import type { HistoricalEvent } from "./history/types";
 import { runHistoryIngest } from "./history/ingestHistory";
 import { generatePreviewBlob } from "./imagePreview";
-import { dateToX, computeLinePath } from "./timelineUtils";
+import { dateToX, computeLinePath, getBaseDate } from "./timelineUtils";
 import { MarkerLink } from "./MarkerLink";
 import { getLocalImageUrl } from "./history/localPics";
 import { getMainEventIds } from "./history/mainEvents";
@@ -270,9 +270,6 @@ function App() {
   const [scaleIndex, setScaleIndex] = useState(2);
   const [personalPhotos, setPersonalPhotos] = useState<PersonalPhoto[]>([]);
   const [historicalEvents, setHistoricalEvents] = useState<HistoricalEvent[]>([]);
-  const [historicalImageUrls, setHistoricalImageUrls] = useState<
-    Record<string, string>
-  >({});
   const [layoutInfo, setLayoutInfo] = useState<{
     width: number;
     height: number;
@@ -341,7 +338,6 @@ function App() {
   const visibleHistIdsRef = useRef<Set<string>>(new Set());
   const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleScrollStopRef = useRef<() => void>(() => {});
-  const thumbnailUrlCacheRef = useRef<Map<string, string>>(new Map());
   const [liftedHistId, setLiftedHistId] = useState<string | null>(null);
   const hoverLiftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scale = scales[scaleIndex];
@@ -443,65 +439,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const urls: Record<string, string> = {};
-    const createdBlobUrls: string[] = [];
-    historicalEvents.forEach((e) => {
-      if (e.previewBlob) {
-        const url = URL.createObjectURL(e.previewBlob);
-        urls[e.id] = url;
-        createdBlobUrls.push(url);
-      } else if (e.thumbnailUrl) {
-        const cached = thumbnailUrlCacheRef.current.get(e.id);
-        if (cached) {
-          urls[e.id] = cached;
-        }
-      }
-    });
-    setHistoricalImageUrls((prev) => {
-      Object.entries(prev).forEach(([id, u]) => {
-        const stillNeeded = id in urls && urls[id] === u;
-        const isCached = thumbnailUrlCacheRef.current.get(id) === u;
-        if (!stillNeeded && !isCached) {
-          URL.revokeObjectURL(u);
-        }
-      });
-      return urls;
-    });
-    return () => {
-      createdBlobUrls.forEach((u) => URL.revokeObjectURL(u));
-    };
-  }, [historicalEvents]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const toFetch = historicalEvents.filter(
-      (e) =>
-        e.thumbnailUrl &&
-        !e.previewBlob &&
-        !thumbnailUrlCacheRef.current.has(e.id)
-    );
-    toFetch.forEach(async (e) => {
-      if (cancelled) return;
-      try {
-        const res = await fetch(e.thumbnailUrl!, { mode: "cors" });
-        if (!res.ok || cancelled) return;
-        const blob = await res.blob();
-        if (cancelled) return;
-        const blobUrl = URL.createObjectURL(blob);
-        thumbnailUrlCacheRef.current.set(e.id, blobUrl);
-        setHistoricalImageUrls((prev) =>
-          prev[e.id] ? prev : { ...prev, [e.id]: blobUrl }
-        );
-      } catch {
-        /* ignore */
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [historicalEvents]);
-
-  useEffect(() => {
     setCenterDate((prev) => clampCenterToToday(prev, scale));
   }, [scale]);
 
@@ -509,8 +446,6 @@ function App() {
     return () => {
       objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       objectUrlsRef.current.clear();
-      thumbnailUrlCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
-      thumbnailUrlCacheRef.current.clear();
     };
   }, []);
 
@@ -742,8 +677,20 @@ function App() {
     return ticks;
   }, [axisDates]);
 
+  const [ingestVersion, setIngestVersion] = useState(0);
+  const [ingestRefreshing, setIngestRefreshing] = useState(false);
   useEffect(() => {
-    runHistoryIngest();
+    runHistoryIngest().finally(() => setIngestVersion((v) => v + 1));
+  }, []);
+
+  const handleRefreshTimeline = useCallback(async () => {
+    setIngestRefreshing(true);
+    try {
+      await runHistoryIngest();
+      setIngestVersion((v) => v + 1);
+    } finally {
+      setIngestRefreshing(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -767,7 +714,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [axisDates, scale]);
+  }, [axisDates, scale, ingestVersion]);
 
   const photosForTimeline = useMemo(
     () => personalPhotos.filter((p) => p.showOnTimeline !== false),
@@ -903,9 +850,10 @@ function App() {
     const OVERLAP_OFFSET_PX = 25;
     const byDate = new Map<string, (typeof withPos)[number][]>();
     for (const ev of withPos) {
-      const list = byDate.get(ev.date) ?? [];
+      const baseDate = getBaseDate(ev.date);
+      const list = byDate.get(baseDate) ?? [];
       list.push(ev);
-      byDate.set(ev.date, list);
+      byDate.set(baseDate, list);
     }
     const overlapIds = new Set<string>();
     for (const list of byDate.values()) {
@@ -1771,6 +1719,14 @@ function App() {
           <button
             type="button"
             className="top-bar-btn"
+            onClick={handleRefreshTimeline}
+            disabled={ingestRefreshing}
+          >
+            {ingestRefreshing ? "Загрузка…" : "Обновить таймлайн"}
+          </button>
+          <button
+            type="button"
+            className="top-bar-btn"
             onClick={() => setModalOpen(true)}
           >
             + Добавить фото
@@ -1871,7 +1827,6 @@ function App() {
         isOpen={selectedHistoricalEvent != null}
         onClose={() => setSelectedHistoricalEvent(null)}
         getLocalImageUrl={getLocalImageUrl}
-        historicalImageUrls={historicalImageUrls}
       />
 
       <main
@@ -1907,7 +1862,7 @@ function App() {
               top: `${seriesBadgePosition.top}px`,
               transform:
                 seriesBadgePosition.align === "above"
-                  ? "translateX(-50%)"
+                  ? "translate(-50%, -100%)"
                   : seriesBadgePosition.align === "left"
                     ? "translate(-100%, -50%)"
                     : "translateY(-50%)",
@@ -2017,7 +1972,6 @@ function App() {
                 axisY={layoutInfo.axisY}
                 cardRefsMap={historicalCardRefs}
                 getLocalImageUrl={getLocalImageUrl}
-                historicalImageUrls={historicalImageUrls}
                 mainEventIds={mainEventIds}
                 mainEffectMode={
                   scale === "10y" ? "10y" : "5y"

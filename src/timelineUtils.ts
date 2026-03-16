@@ -1,15 +1,23 @@
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
+/** Strip _2, _3 suffix for same-day events — use base date for positioning */
+export function getBaseDate(date: string): string {
+  return date.replace(/_\d+$/, "") || date;
+}
+
 /**
  * Convert a date to X position in pixels.
  * Uses axisStart as origin and pxPerDay for scale.
+ * Handles YYYY-MM-DD_2 format (same-day events).
  */
 export function dateToX(
   date: Date | string,
   axisStart: Date,
   pxPerDay: number
 ): number {
-  const dateMs = typeof date === "string" ? new Date(date).getTime() : date.getTime();
+  const dateStr = typeof date === "string" ? getBaseDate(date) : null;
+  const dateMs =
+    dateStr !== null ? new Date(dateStr).getTime() : (date as Date).getTime();
   const startMs = axisStart.getTime();
   const daysFromStart = (dateMs - startMs) / MS_IN_DAY;
   return daysFromStart * pxPerDay;

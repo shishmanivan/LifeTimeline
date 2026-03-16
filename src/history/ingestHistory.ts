@@ -5,14 +5,9 @@ import {
   getHistoricalEvent,
 } from "../db";
 import { assignHistoricalLanes } from "./laneAssignment";
-import manifest from "./HistoryPics/_manifest.json";
-import { generatePreviewBlob } from "../imagePreview";
 import type { HistoricalEvent } from "./types";
-
-const WIKI_API = "https://en.wikipedia.org/w/api.php";
-const WIKI_CONCURRENCY = 4;
-const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-const ENRICH_VERSION = 1;
+/** YYYY-MM-DD or YYYY-MM-DD_2, _3, _4 for same-day events */
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}(_\d+)?$/;
 
 async function sha1(str: string): Promise<string> {
   const enc = new TextEncoder();
@@ -102,7 +97,7 @@ export function parseTsv(
     const image = imageIdx >= 0 ? get(imageIdx) : "";
 
     if (!DATE_REGEX.test(date)) {
-      console.warn(`[history] ${fileName}:${i + 1}: invalid date (expected YYYY-MM-DD): ${date}`);
+      console.warn(`[history] ${fileName}:${i + 1}: invalid date (expected YYYY-MM-DD or YYYY-MM-DD_2): ${date}`);
       errors++;
       continue;
     }
@@ -117,82 +112,24 @@ export function parseTsv(
   return { rows, errors };
 }
 
-type WikiPageData = {
-  title: string;
-  extract?: string;
-  thumbnailUrl?: string;
-  ruUrl?: string;
-};
-
-async function fetchWikiThumbnail(url: string): Promise<WikiPageData> {
-  const title = decodeURIComponent(url.split("/wiki/")[1] ?? "");
-  const params = new URLSearchParams({
-    action: "query",
-    titles: title,
-    prop: "pageimages|extracts|langlinks",
-    format: "json",
-    origin: "*",
-    piprop: "thumbnail",
-    pithumbsize: "640",
-    exintro: "1",
-    explaintext: "1",
-    exlimit: "1",
-    lllang: "ru",
-    llprop: "url",
-  });
-  const res = await fetch(`${WIKI_API}?${params}`);
-  const json = await res.json();
-  const pages = json?.query?.pages ?? {};
-  const page = Object.values(pages)[0] as Record<string, unknown> | undefined;
-  if (!page || page.missing !== undefined) {
-    return { title: title.replace(/_/g, " ") };
-  }
-  const pageTitle = (page.title as string) ?? title;
-  const extract = (page.extract as string) ?? "";
-  const thumb = page.thumbnail as { source?: string } | undefined;
-  const langlinks = page.langlinks as { lang: string; url?: string }[] | undefined;
-  const ruLink = langlinks?.find((ll) => ll.lang === "ru");
-  const ruUrl = ruLink?.url;
-  return { title: pageTitle, extract, thumbnailUrl: thumb?.source, ruUrl };
-}
-
-async function downloadBlob(url: string): Promise<Blob> {
-  const res = await fetch(url, { mode: "cors" });
-  if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-  return res.blob();
-}
-
-async function fetchWithLimit<T>(
-  queue: (() => Promise<T>)[],
-  limit: number
-): Promise<T[]> {
-  const results: (T | undefined)[] = new Array(queue.length);
-  let idx = 0;
-  const run = async (): Promise<void> => {
-    while (idx < queue.length) {
-      const i = idx++;
-      const fn = queue[i];
-      if (!fn) break;
-      try {
-        results[i] = await fn();
-      } catch {
-        results[i] = undefined;
-      }
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(limit, queue.length) }, () => run())
-  );
-  return results as T[];
-}
-
-function needsEnrich(existing: HistoricalEvent | null, row: ParsedRow): boolean {
+function needsEnrich(
+  existing: HistoricalEvent | null,
+  row: ParsedRow,
+  sourceFile: string
+): boolean {
   if (!existing) return true;
   const titleMatch = (row.title.trim() || existing.title) === existing.title;
   const langMatch = existing.lang === row.lang;
-  const imageMatch = !row.image.trim() || existing.thumbnailUrl === row.image.trim();
   const urlMatch = (row.ruUrl || row.url) === existing.url;
-  return !titleMatch || !langMatch || !imageMatch || !urlMatch;
+  const sourceMatch = existing.sourceFile === sourceFile;
+  const sourceLineMatch = existing.sourceLine === row.sourceLine;
+  return (
+    !titleMatch ||
+    !langMatch ||
+    !urlMatch ||
+    !sourceMatch ||
+    !sourceLineMatch
+  );
 }
 
 const ingestLock = { running: false, promise: null as Promise<void> | null };
@@ -214,7 +151,7 @@ export async function runHistoryIngest(): Promise<void> {
 }
 
 async function runHistoryIngestInternal(): Promise<void> {
-  const modules = import.meta.glob<string>("./sources/*.tsv", {
+  const modules = import.meta.glob<string>("./sources/**/*.tsv", {
     query: "?raw",
     import: "default",
   });
@@ -233,20 +170,24 @@ async function runHistoryIngestInternal(): Promise<void> {
     }
   }
 
-  for (const [path, loader] of Object.entries(modules)) {
-    const fileName = path.split("/").pop() ?? path;
-    if (fileName === "Main.tsv") continue;
+  for (const [modulePath, loader] of Object.entries(modules)) {
+    const sourcesIdx = modulePath.indexOf("sources/");
+    const sourceFile = sourcesIdx >= 0 ? modulePath.slice(sourcesIdx + 8) : modulePath.split("/").pop() ?? modulePath;
+    if (sourceFile === "Main.tsv") continue;
     let raw: string;
     try {
       raw = await loader();
     } catch (e) {
-      console.warn(`[history] Failed to load ${fileName}:`, e);
+      console.warn(`[history] Failed to load ${sourceFile}:`, e);
       totalErrors++;
       continue;
     }
 
-    const { rows, errors } = parseTsv(raw, fileName);
+    const { rows, errors } = parseTsv(raw, sourceFile);
     totalErrors += errors;
+    if (import.meta.env.DEV && sourceFile.toLowerCase().includes("culture")) {
+      console.log(`[history] Ingest ${sourceFile}: ${rows.length} rows`);
+    }
 
     const currentIds = new Set<string>();
     for (const row of rows) {
@@ -254,13 +195,17 @@ async function runHistoryIngestInternal(): Promise<void> {
       currentIds.add(await sha1(idStr));
     }
 
+    // Match by full path or basename (handles old DB entries with "21с.tsv" vs "Culture/21с.tsv")
+    const sourceBase = sourceFile.split("/").pop() ?? sourceFile;
+    const sameSource = (e: { sourceFile: string }) =>
+      e.sourceFile === sourceFile || e.sourceFile === sourceBase;
     const toRemove = allFromDb.filter(
-      (e) => e.sourceFile === fileName && !currentIds.has(e.id)
+      (e) => sameSource(e) && !currentIds.has(e.id)
     );
     if (toRemove.length > 0) {
       await deleteHistoricalEventsByIds(toRemove.map((e) => e.id));
       if (import.meta.env.DEV) {
-        console.log(`[history] Removed ${toRemove.length} events from ${fileName}`);
+        console.log(`[history] Removed ${toRemove.length} events from ${sourceFile}`);
       }
     }
 
@@ -268,76 +213,42 @@ async function runHistoryIngestInternal(): Promise<void> {
     const tasks = rows.map((row) => async (): Promise<HistoricalEvent | null> => {
       const idStr = `${row.date}|${row.url}`;
       const id = await sha1(idStr);
+      const displayUrl = row.ruUrl || row.url;
 
       const existing = await getHistoricalEvent(id);
-      if (!needsEnrich(existing, row)) return null;
+      if (!needsEnrich(existing, row, sourceFile)) return null;
 
-      const hasLocalPic = (manifest as Record<string, string>)[idStr] != null;
-      let thumbnailUrl = row.image ? row.image.trim() : undefined;
       let title = row.title.trim() || undefined;
-      let summary: string | undefined;
 
-      let ruUrl: string | undefined = row.ruUrl || undefined;
-      if (row.url.includes("wikipedia.org")) {
-        try {
-          const wiki = await fetchWikiThumbnail(row.url);
-          if (!title) title = wiki.title;
-          summary = wiki.extract?.slice(0, 300);
-          if (!thumbnailUrl && !hasLocalPic) thumbnailUrl = wiki.thumbnailUrl;
-          if (!ruUrl) ruUrl = wiki.ruUrl;
-        } catch {
-          /* leave empty */
-        }
-      }
-
-      let previewBlob: Blob | undefined;
-      if (thumbnailUrl && !hasLocalPic) {
-        try {
-          const fullBlob = await downloadBlob(thumbnailUrl);
-          previewBlob = await generatePreviewBlob(fullBlob, 320);
-        } catch {
-          /* leave empty */
-        }
-      }
-      if (hasLocalPic) {
-        thumbnailUrl = undefined;
-        previewBlob = undefined;
-      }
-
-      const displayUrl = row.ruUrl || row.url;
       const ev: HistoricalEvent = {
         id,
         date: row.date,
         url: displayUrl,
         title: title ?? row.url,
         lang: row.lang,
-        thumbnailUrl,
-        previewBlob,
         tags: [],
-        sourceFile: fileName,
+        sourceFile,
         sourceLine: row.sourceLine,
         updatedAt: new Date().toISOString(),
-        enrichVersion: ENRICH_VERSION,
-        summary,
         importance: 3,
-        ruUrl: displayUrl.startsWith("https://ru.wikipedia") ? undefined : ruUrl,
+        ruUrl: displayUrl.startsWith("https://ru.wikipedia") ? undefined : row.ruUrl,
       };
       return ev;
     });
 
-    const results = await fetchWithLimit<HistoricalEvent | null>(
-      tasks,
-      WIKI_CONCURRENCY
-    );
+    const results = await Promise.all(tasks.map((task) => task()));
     const toUpsert = results.filter((e): e is HistoricalEvent => e != null);
     if (toUpsert.length > 0) {
       await bulkUpsertHistoricalEvents(toUpsert);
       totalEvents += toUpsert.length;
+      if (import.meta.env.DEV && sourceFile.toLowerCase().includes("culture")) {
+        console.log(`[history] Upserted ${toUpsert.length} events from ${sourceFile}`);
+      }
     }
 
     if (import.meta.env.DEV && (toUpsert.length > 0 || errors > 0)) {
       console.log(
-        `[history] Ingested ${fileName}: ${toUpsert.length} events, errors: ${errors}`
+        `[history] Ingested ${sourceFile}: ${toUpsert.length} events, errors: ${errors}`
       );
     }
   }

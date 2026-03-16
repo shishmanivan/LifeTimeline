@@ -6,8 +6,11 @@ type HistoricalEventModalProps = {
   event: HistoricalEvent | null;
   isOpen: boolean;
   onClose: () => void;
-  getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
-  historicalImageUrls?: Record<string, string>;
+  getLocalImageUrl?: (e: {
+    date: string;
+    url: string;
+    sourceFile?: string;
+  }) => string | undefined;
 };
 
 const EMPTY_EVENT: HistoricalEvent = {
@@ -19,7 +22,6 @@ const EMPTY_EVENT: HistoricalEvent = {
   sourceFile: "",
   sourceLine: 0,
   updatedAt: "",
-  enrichVersion: 0,
 };
 
 export function HistoricalEventModal({
@@ -27,13 +29,8 @@ export function HistoricalEventModal({
   isOpen,
   onClose,
   getLocalImageUrl,
-  historicalImageUrls,
 }: HistoricalEventModalProps) {
-  const imageUrl = useResolvedImageUrl(
-    event ?? EMPTY_EVENT,
-    getLocalImageUrl,
-    historicalImageUrls
-  );
+  const imageUrl = useResolvedImageUrl(event ?? EMPTY_EVENT, getLocalImageUrl);
 
   const handleEscape = useCallback(
     (e: KeyboardEvent) => {
@@ -102,7 +99,9 @@ export function HistoricalEventModal({
             >
               {event.title}
             </a>
-            <div className="historical-modal-date">{event.date}</div>
+            <div className="historical-modal-date">
+              {event.date.replace(/_\d+$/, "")}
+            </div>
             {linkDomain && (
               <div className="historical-modal-source">{linkDomain}</div>
             )}

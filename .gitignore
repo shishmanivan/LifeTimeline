@@ -5,3 +5,6 @@ dist
 .env.local
 .DS_Store
 *.log
+
+# History images (thousands of files, fetched by npm run history:pics)
+src/history/HistoryPics/

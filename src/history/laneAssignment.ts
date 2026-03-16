@@ -1,4 +1,5 @@
 import type { HistoricalEvent } from "./types";
+import { getBaseDate } from "../timelineUtils";
 
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 export const MAX_LANES = 3;
@@ -22,7 +23,9 @@ export function assignHistoricalLanes(
   events: HistoricalEvent[]
 ): (HistoricalEvent & { laneIndex: number })[] {
   const sorted = [...events].sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    (a, b) =>
+      new Date(getBaseDate(a.date)).getTime() -
+      new Date(getBaseDate(b.date)).getTime()
   );
   const halfW = CANONICAL_WIDTH_DAYS / 2;
   const halfWMs = halfW * MS_IN_DAY;
@@ -33,7 +36,7 @@ export function assignHistoricalLanes(
   const laneDates: Set<string>[] = [new Set(), new Set()];
 
   for (const ev of sorted) {
-    const evMs = new Date(ev.date).getTime();
+    const evMs = new Date(getBaseDate(ev.date)).getTime();
     const rangeStart = evMs - halfWMs;
     const rangeEnd = evMs + halfWMs;
     const baseLane = djb2Hash(ev.id) % collidableLanes;
@@ -48,7 +51,8 @@ export function assignHistoricalLanes(
     }
 
     let laneIdx: number;
-    const sameDayLanes = [0, 1].filter((i) => laneDates[i]?.has(ev.date));
+    const baseDate = getBaseDate(ev.date);
+    const sameDayLanes = [0, 1].filter((i) => laneDates[i]?.has(baseDate));
     const avoidLanes = new Set(sameDayLanes);
     const preferredLanes = freeLanes.filter((i) => !avoidLanes.has(i));
 
@@ -72,7 +76,7 @@ export function assignHistoricalLanes(
     if (!laneIntervals[laneIdx]) laneIntervals[laneIdx] = [];
     laneIntervals[laneIdx].push({ start: rangeStart, end: rangeEnd });
     if (!laneDates[laneIdx]) laneDates[laneIdx] = new Set();
-    laneDates[laneIdx].add(ev.date);
+    laneDates[laneIdx].add(baseDate);
     result.push({ ...ev, laneIndex: laneIdx });
   }
 

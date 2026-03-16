@@ -169,9 +169,6 @@ function App() {
   const [scaleIndex, setScaleIndex] = useState(2);
   const [personalPhotos, setPersonalPhotos] = useState<PersonalPhoto[]>([]);
   const [historicalEvents, setHistoricalEvents] = useState<HistoricalEvent[]>([]);
-  const [historicalImageUrls, setHistoricalImageUrls] = useState<
-    Record<string, string>
-  >({});
   const [layoutInfo, setLayoutInfo] = useState<{
     width: number;
     height: number;
@@ -284,22 +281,6 @@ function App() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    const urls: Record<string, string> = {};
-    historicalEvents.forEach((e) => {
-      if (e.previewBlob) {
-        urls[e.id] = URL.createObjectURL(e.previewBlob);
-      }
-    });
-    setHistoricalImageUrls((prev) => {
-      Object.values(prev).forEach((u) => URL.revokeObjectURL(u));
-      return urls;
-    });
-    return () => {
-      Object.values(urls).forEach((u) => URL.revokeObjectURL(u));
-    };
-  }, [historicalEvents]);
 
   useEffect(() => {
     setCenterDate((prev) => clampCenterToToday(prev, scale));
@@ -1082,7 +1063,6 @@ function App() {
                 axisY={layoutInfo.axisY}
                 cardRefsMap={historicalCardRefs}
                 getLocalImageUrl={getLocalImageUrl}
-                historicalImageUrls={historicalImageUrls}
               />
             </div>
           </>

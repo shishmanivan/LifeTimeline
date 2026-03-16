@@ -132,14 +132,10 @@ const HISTORICAL_WHITELIST: (keyof HistoricalEvent)[] = [
   "url",
   "title",
   "lang",
-  "thumbnailUrl",
-  "previewBlob",
   "tags",
   "sourceFile",
   "sourceLine",
   "updatedAt",
-  "enrichVersion",
-  "summary",
   "importance",
 ];
 

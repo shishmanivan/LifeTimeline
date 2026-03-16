@@ -1,26 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { HistoricalEvent } from "./history/types";
 
-/** Resolve image URL: HistoryPics > cached > previewBlob > thumbnailUrl */
+/** Resolve image URL from local HistoryPics only. */
 function useResolvedImageUrl(
   event: HistoricalEvent,
-  getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined,
-  historicalImageUrls?: Record<string, string>
+  getLocalImageUrl?: (e: {
+    date: string;
+    url: string;
+    sourceFile?: string;
+  }) => string | undefined
 ): string | undefined {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const local = getLocalImageUrl?.(event);
-  const cached = historicalImageUrls?.[event.id];
-  const thumb = event.thumbnailUrl;
-
-  useEffect(() => {
-    if (event.previewBlob && !local && !cached) {
-      const url = URL.createObjectURL(event.previewBlob);
-      setBlobUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }
-  }, [event.previewBlob, event.id, local, cached]);
-
-  return local ?? cached ?? blobUrl ?? thumb;
+  return getLocalImageUrl?.(event);
 }
 
 export type PositionedHistorical = HistoricalEvent & {
@@ -101,8 +91,11 @@ type HistoricalCardProps = {
   event: PositionedHistorical;
   cardRefsMap: React.MutableRefObject<Map<string, HTMLDivElement>>;
   top: number;
-  getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
-  historicalImageUrls?: Record<string, string>;
+  getLocalImageUrl?: (e: {
+    date: string;
+    url: string;
+    sourceFile?: string;
+  }) => string | undefined;
 };
 
 function HistoricalCard({
@@ -110,9 +103,8 @@ function HistoricalCard({
   cardRefsMap,
   top,
   getLocalImageUrl,
-  historicalImageUrls,
 }: HistoricalCardProps) {
-  const imageUrl = useResolvedImageUrl(event, getLocalImageUrl, historicalImageUrls);
+  const imageUrl = useResolvedImageUrl(event, getLocalImageUrl);
   const [imgLoaded, setImgLoaded] = useState(false);
 
   if (import.meta.env.DEV) {
@@ -164,7 +156,7 @@ function HistoricalCard({
             />
           )}
         </div>
-        <div className="cardTitle titleHistorical" title={event.summary ?? ""}>
+        <div className="cardTitle titleHistorical" title={event.title}>
           {event.title}
         </div>
       </div>
@@ -178,8 +170,11 @@ type HistoricalLayerProps = {
   cardRefsMap: React.MutableRefObject<Map<string, HTMLDivElement>>;
   /** When inside zone wrapper: use topRelativeToZone for positioning */
   insideZone?: boolean;
-  getLocalImageUrl?: (e: { date: string; url: string }) => string | undefined;
-  historicalImageUrls?: Record<string, string>;
+  getLocalImageUrl?: (e: {
+    date: string;
+    url: string;
+    sourceFile?: string;
+  }) => string | undefined;
 };
 
 export function HistoricalLayer({
@@ -188,7 +183,6 @@ export function HistoricalLayer({
   cardRefsMap,
   insideZone = true,
   getLocalImageUrl,
-  historicalImageUrls,
 }: HistoricalLayerProps) {
   return (
     <>
@@ -205,7 +199,6 @@ export function HistoricalLayer({
             cardRefsMap={cardRefsMap}
             top={top}
             getLocalImageUrl={getLocalImageUrl}
-            historicalImageUrls={historicalImageUrls}
           />
         );
       })}

@@ -1,12 +1,12 @@
 /**
  * Local image cache for historical events.
- * Priority: HistoryPics (manifest) > IndexedDB previewBlob > Wikipedia thumbnailUrl
+ * Priority: local HistoryPics only.
  */
 
 import manifest from "./HistoryPics/_manifest.json";
 
 const picModules = import.meta.glob<string>(
-  "./HistoryPics/*.{png,jpg,jpeg,webp,avif}",
+  "./HistoryPics/*.{png,jpg,jpeg,webp,avif,svg}",
   { eager: true, import: "default" }
 );
 
@@ -16,7 +16,7 @@ for (const [path, url] of Object.entries(picModules)) {
   filenameToUrl.set(filename, url);
 }
 
-const EXTENSIONS = [".webp", ".jpg", ".jpeg", ".png", ".avif"];
+const EXTENSIONS = [".webp", ".jpg", ".jpeg", ".png", ".avif", ".svg"];
 
 function tryByBaseName(base: string): string | undefined {
   for (const ext of EXTENSIONS) {
