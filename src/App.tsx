@@ -127,6 +127,35 @@ const LAYERS = [
   { id: "culture", title: "Культура и искусство" },
 ] as const;
 
+const TIMELINE_STATE_KEY = "timeline-mvp-state";
+
+type PersistedTimelineState = {
+  scaleIndex?: number;
+  centerDate?: string;
+  visibleLayers?: string[];
+};
+
+function loadTimelineState(): PersistedTimelineState {
+  try {
+    const raw = localStorage.getItem(TIMELINE_STATE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as PersistedTimelineState;
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function saveTimelineState(partial: Partial<PersistedTimelineState>): void {
+  try {
+    const current = loadTimelineState();
+    const merged = { ...current, ...partial };
+    localStorage.setItem(TIMELINE_STATE_KEY, JSON.stringify(merged));
+  } catch {
+    /* ignore */
+  }
+}
+
 function getEventLayerId(event: { sourceFile: string }): string {
   const f = event.sourceFile.toLowerCase();
   return f.includes("culture") || f.includes("культура") ? "culture" : "main";
@@ -267,7 +296,13 @@ function AddPhotoModal({ onClose, onSubmit }: AddPhotoModalProps) {
 }
 
 function App() {
-  const [scaleIndex, setScaleIndex] = useState(2);
+  const persisted = useMemo(loadTimelineState, []);
+
+  const [scaleIndex, setScaleIndex] = useState(() => {
+    const i = persisted.scaleIndex;
+    if (typeof i === "number" && i >= 0 && i < scales.length) return i;
+    return 2;
+  });
   const [personalPhotos, setPersonalPhotos] = useState<PersonalPhoto[]>([]);
   const [historicalEvents, setHistoricalEvents] = useState<HistoricalEvent[]>([]);
   const [layoutInfo, setLayoutInfo] = useState<{
@@ -282,9 +317,15 @@ function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [gotoDateModalOpen, setGotoDateModalOpen] = useState(false);
   const [layersModalOpen, setLayersModalOpen] = useState(false);
-  const [visibleLayers, setVisibleLayers] = useState<Set<string>>(
-    () => new Set(LAYERS.map((l) => l.id))
-  );
+  const [visibleLayers, setVisibleLayers] = useState<Set<string>>(() => {
+    const ids = LAYERS.map((l) => l.id);
+    const saved = persisted.visibleLayers;
+    if (Array.isArray(saved) && saved.length > 0) {
+      const valid = saved.filter((id) => ids.includes(id));
+      if (valid.length > 0) return new Set(valid);
+    }
+    return new Set(ids);
+  });
   const [overlayPhotoId, setOverlayPhotoId] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
   const [overlayEditMode, setOverlayEditMode] = useState(false);
@@ -298,9 +339,18 @@ function App() {
   const [seriesMap, setSeriesMap] = useState<Record<string, string>>({});
   const [selectedHistoricalEvent, setSelectedHistoricalEvent] =
     useState<HistoricalEvent | null>(null);
-  const [centerDate, setCenterDate] = useState(() =>
-    clampCenterToToday(new Date(), "1y")
-  );
+  const [centerDate, setCenterDate] = useState(() => {
+    const s = persisted.centerDate;
+    const scaleIdx = typeof persisted.scaleIndex === "number" && persisted.scaleIndex >= 0 && persisted.scaleIndex < scales.length
+      ? persisted.scaleIndex
+      : 2;
+    const scaleForClamp = scales[scaleIdx] as Scale;
+    if (typeof s === "string") {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return clampCenterToToday(d, scaleForClamp);
+    }
+    return clampCenterToToday(new Date(), scaleForClamp);
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [cardDragging, setCardDragging] = useState<string | null>(null);
   const [pendingOffsets, setPendingOffsets] = useState<Record<string, Offsets>>(
@@ -338,6 +388,8 @@ function App() {
   const visibleHistIdsRef = useRef<Set<string>>(new Set());
   const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleScrollStopRef = useRef<() => void>(() => {});
+  const centerDateRef = useRef(centerDate);
+  const saveStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [liftedHistId, setLiftedHistId] = useState<string | null>(null);
   const hoverLiftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scale = scales[scaleIndex];
@@ -441,6 +493,40 @@ function App() {
   useEffect(() => {
     setCenterDate((prev) => clampCenterToToday(prev, scale));
   }, [scale]);
+
+  centerDateRef.current = centerDate;
+
+  useEffect(() => {
+    saveTimelineState({
+      scaleIndex,
+      visibleLayers: Array.from(visibleLayers),
+    });
+  }, [scaleIndex, visibleLayers]);
+
+  useEffect(() => {
+    if (saveStateTimerRef.current) clearTimeout(saveStateTimerRef.current);
+    saveStateTimerRef.current = setTimeout(() => {
+      saveStateTimerRef.current = null;
+      saveTimelineState({
+        centerDate: centerDate.toISOString().slice(0, 10),
+      });
+    }, 400);
+    return () => {
+      if (saveStateTimerRef.current) clearTimeout(saveStateTimerRef.current);
+    };
+  }, [centerDate]);
+
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      saveTimelineState({
+        scaleIndex,
+        centerDate: centerDateRef.current.toISOString().slice(0, 10),
+        visibleLayers: Array.from(visibleLayers),
+      });
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [scaleIndex, visibleLayers]);
 
   useEffect(() => {
     return () => {

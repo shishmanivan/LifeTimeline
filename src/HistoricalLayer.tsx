@@ -32,8 +32,8 @@ export const OVERLAP_OFFSET_PX = 25;
 export const HIST_CARD_WIDTH_PX = 120;
 export const HIST_CARD_GAP_PX = 8;
 export const AXIS_GAP = 20;
-/** Lane height: image(4:3) + title(4 lines max) + padding. Fixed, zoom-independent. */
-export const HIST_LANE_HEIGHT = 195;
+/** Lane height: image(4:3) + title(5 lines max) + padding. Fixed, zoom-independent. */
+export const HIST_LANE_HEIGHT = 220;
 /** Margin above card: article.top = yTop - this so card top = yTop */
 export const HIST_ARTICLE_OFFSET = 8;
 

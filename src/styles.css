@@ -577,10 +577,10 @@ body {
   margin: 0;
 }
 
-/* Historical: max 4 lines, inherit text style from .cardTitle */
+/* Historical: max 5 lines, inherit text style from .cardTitle */
 .titleHistorical {
   display: -webkit-box;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
   height: auto;

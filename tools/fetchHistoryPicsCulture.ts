@@ -4,6 +4,7 @@
  * Downloads only events that are not already present in Culture manifest/folder.
  *
  * Usage: npm run history:pics:culture
+ *        npm run history:pics:culture -- 198c.tsv   # only this file
  */
 
 import fs from "fs";
@@ -250,7 +251,16 @@ async function main(): Promise<void> {
     }
   }
 
-  const tsvFiles = collectTsvFiles(SOURCES_DIR);
+  let tsvFiles = collectTsvFiles(SOURCES_DIR);
+  const fileFilter = process.argv[2];
+  if (fileFilter) {
+    tsvFiles = tsvFiles.filter((f) => f.endsWith(fileFilter) || path.basename(f) === fileFilter);
+    if (tsvFiles.length === 0) {
+      console.error(`[historypics:culture] No TSV matching: ${fileFilter}`);
+      process.exit(1);
+    }
+    console.log(`[historypics:culture] Filter: ${fileFilter} (${tsvFiles.length} file(s))\n`);
+  }
   const allRows: ParsedRow[] = [];
   for (const file of tsvFiles) {
     const raw = fs.readFileSync(path.join(SOURCES_DIR, file), "utf-8");
