@@ -1,0 +1,2 @@
+date	en_url	image	en_title	ru_title	ru_url
+# Добавьте строки событий (тот же формат, что в Culture/). Файлы *.tsv в этой папке подхватывает ingest.

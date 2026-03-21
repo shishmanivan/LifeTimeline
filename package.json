@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "history:pics": "tsx tools/fetchHistoryPics.ts",
     "history:pics:culture": "tsx tools/fetchHistoryPicsCulture.ts",
+    "history:pics:autos": "tsx tools/fetchHistoryPicsAutos.ts",
     "history:pics:culture:chunk": "tsx tools/fetchHistoryPicsCultureChunk.ts",
     "history:pics:clean": "tsx tools/cleanHistoryPicsDuplicates.ts",
     "history:pics:svg": "tsx tools/fetchHistoryPicsSvg.ts"

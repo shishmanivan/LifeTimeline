@@ -31,6 +31,12 @@ export const OVERLAP_OFFSET_PX = 25;
 
 export const HIST_CARD_WIDTH_PX = 120;
 export const HIST_CARD_GAP_PX = 8;
+/** Autos layer: fewer events — cards rendered this much larger than main/culture */
+export const AUTOS_HISTORICAL_CARD_SCALE = 1.2;
+
+function isAutosHistoricalSource(sourceFile?: string): boolean {
+  return (sourceFile ?? "").toLowerCase().replace(/\\/g, "/").includes("autos/");
+}
 export const AXIS_GAP = 20;
 /** Lane height: image(4:3) + title(5 lines max) + padding. Fixed, zoom-independent. */
 export const HIST_LANE_HEIGHT = 220;
@@ -129,6 +135,9 @@ function HistoricalCard({
         : mainEffectMode === "small"
           ? 1.08
           : 1;
+  const autosScale = isAutosHistoricalSource(event.sourceFile)
+    ? AUTOS_HISTORICAL_CARD_SCALE
+    : 1;
   const showEntranceAnimation =
     shouldAnimateMain && isMainEvent && mainEffectMode !== "none";
   const entranceTranslateY = showEntranceAnimation && !hasAnimated ? 8 : 0;
@@ -136,13 +145,18 @@ function HistoricalCard({
   const cardStyle =
     isMainEvent && mainEffectMode !== "none"
       ? {
-          transform: `translateX(-50%) translateY(${entranceTranslateY}px) scale(${mainScale})`,
+          transform: `translateX(-50%) translateY(${entranceTranslateY}px) scale(${mainScale * autosScale})`,
           opacity: entranceOpacity,
           transition: showEntranceAnimation
             ? "opacity 140ms ease-out 120ms, transform 140ms ease-out 120ms"
             : undefined,
         }
-      : { transform: "translateX(-50%)" };
+      : {
+          transform:
+            autosScale !== 1
+              ? `translateX(-50%) scale(${autosScale})`
+              : "translateX(-50%)",
+        };
 
   const dimClass =
     dimNonMain && !isMainEvent && mainEffectMode === "10y"
@@ -171,10 +185,12 @@ function HistoricalCard({
   /** 1960s and earlier: desaturate color images (e.g. flags) to match B&W aesthetic */
   const isVintageEra = event.date < "1970-01-01";
 
+  const autosClass = autosScale !== 1 ? "event-historical--autos" : "";
+
   return (
     <article
       data-event-id={event.id}
-      className={`event event-historical ${imageUrl ? "event-photo" : ""} ${mainClass} ${mainModeClass} ${openMainClass} ${dimClass}`.trim()}
+      className={`event event-historical ${imageUrl ? "event-photo" : ""} ${mainClass} ${mainModeClass} ${openMainClass} ${dimClass} ${autosClass}`.trim()}
       style={{
         left: `${event.xPx}px`,
         top: `${topWithOffset}px`,
@@ -183,6 +199,7 @@ function HistoricalCard({
           : isMainEvent && mainEffectMode !== "none"
             ? 2
             : undefined,
+        ...(autosScale !== 1 ? { transformOrigin: "center top" } : {}),
         ...cardStyle,
       }}
     >

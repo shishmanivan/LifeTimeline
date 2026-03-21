@@ -185,7 +185,11 @@ async function runHistoryIngestInternal(): Promise<void> {
 
     const { rows, errors } = parseTsv(raw, sourceFile);
     totalErrors += errors;
-    if (import.meta.env.DEV && sourceFile.toLowerCase().includes("culture")) {
+    const devExtra =
+      import.meta.env.DEV &&
+      (sourceFile.toLowerCase().includes("culture") ||
+        sourceFile.toLowerCase().replace(/\\/g, "/").includes("autos/"));
+    if (devExtra) {
       console.log(`[history] Ingest ${sourceFile}: ${rows.length} rows`);
     }
 
@@ -241,7 +245,7 @@ async function runHistoryIngestInternal(): Promise<void> {
     if (toUpsert.length > 0) {
       await bulkUpsertHistoricalEvents(toUpsert);
       totalEvents += toUpsert.length;
-      if (import.meta.env.DEV && sourceFile.toLowerCase().includes("culture")) {
+      if (devExtra) {
         console.log(`[history] Upserted ${toUpsert.length} events from ${sourceFile}`);
       }
     }

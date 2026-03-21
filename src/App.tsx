@@ -125,6 +125,7 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const LAYERS = [
   { id: "main", title: "Основные мировые события" },
   { id: "culture", title: "Культура и искусство" },
+  { id: "autos", title: "Автомобили" },
 ] as const;
 
 const TIMELINE_STATE_KEY = "timeline-mvp-state";
@@ -157,8 +158,10 @@ function saveTimelineState(partial: Partial<PersistedTimelineState>): void {
 }
 
 function getEventLayerId(event: { sourceFile: string }): string {
-  const f = event.sourceFile.toLowerCase();
-  return f.includes("culture") || f.includes("культура") ? "culture" : "main";
+  const f = event.sourceFile.toLowerCase().replace(/\\/g, "/");
+  if (f.includes("culture") || f.includes("культура")) return "culture";
+  if (f.includes("autos/") || f.startsWith("autos/")) return "autos";
+  return "main";
 }
 
 type GotoDateModalProps = {
@@ -318,7 +321,7 @@ function App() {
   const [gotoDateModalOpen, setGotoDateModalOpen] = useState(false);
   const [layersModalOpen, setLayersModalOpen] = useState(false);
   const [visibleLayers, setVisibleLayers] = useState<Set<string>>(() => {
-    const ids = LAYERS.map((l) => l.id);
+    const ids = LAYERS.map((l) => l.id) as string[];
     const saved = persisted.visibleLayers;
     if (Array.isArray(saved) && saved.length > 0) {
       const valid = saved.filter((id) => ids.includes(id));

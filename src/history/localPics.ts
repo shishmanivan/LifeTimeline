@@ -1,14 +1,16 @@
 /**
  * Local image cache for historical events.
  * Rule: manifest (date|url) first for exact file, then by date.
- * Tries extensions: .webp, .jpg, .jpeg, .png, .avif, .svg.
+ * Tries extensions: .webp, .jpg, .jpeg, .jfif, .png, .avif, .svg.
  *
  * Main layer reads only from `HistoryPics/`.
  * Culture layer reads only from `HistoryPics/Culture/`.
+ * Autos layer reads only from `HistoryPics/Autos/`.
  */
 
 import mainManifest from "./HistoryPics/_manifest.json";
 import cultureManifest from "./HistoryPics/Culture/_manifest.json";
+import autosManifest from "./HistoryPics/Autos/_manifest.json";
 
 /** Must match fetchHistoryPics: normalize URL for consistent manifest lookup */
 function normalizeUrl(url: string): string {
@@ -28,12 +30,17 @@ function normalizeUrl(url: string): string {
 }
 
 const mainPicModules = import.meta.glob<string>(
-  "./HistoryPics/*.{png,jpg,jpeg,webp,avif,svg}",
+  "./HistoryPics/*.{png,jpg,jpeg,jfif,webp,avif,svg}",
   { eager: true, import: "default" }
 );
 
 const culturePicModules = import.meta.glob<string>(
-  "./HistoryPics/Culture/*.{png,jpg,jpeg,webp,avif,svg}",
+  "./HistoryPics/Culture/*.{png,jpg,jpeg,jfif,webp,avif,svg}",
+  { eager: true, import: "default" }
+);
+
+const autosPicModules = import.meta.glob<string>(
+  "./HistoryPics/Autos/*.{png,jpg,jpeg,jfif,webp,avif,svg}",
   { eager: true, import: "default" }
 );
 
@@ -49,7 +56,13 @@ for (const [modulePath, url] of Object.entries(culturePicModules)) {
   cultureFilenameToUrl.set(filename, url);
 }
 
-const EXTENSIONS = [".webp", ".jpg", ".jpeg", ".png", ".avif", ".svg"];
+const autosFilenameToUrl = new Map<string, string>();
+for (const [modulePath, url] of Object.entries(autosPicModules)) {
+  const filename = modulePath.replace(/^.*[/\\]/, "");
+  autosFilenameToUrl.set(filename, url);
+}
+
+const EXTENSIONS = [".webp", ".jpg", ".jpeg", ".jfif", ".png", ".avif", ".svg"];
 
 function tryByBaseName(
   base: string,
@@ -62,18 +75,33 @@ function tryByBaseName(
   return undefined;
 }
 
+type PicsKind = "main" | "culture" | "autos";
+
+function getPicsKind(sourceFile?: string): PicsKind {
+  const f = (sourceFile ?? "").toLowerCase().replace(/\\/g, "/");
+  if (f.includes("culture") || f.includes("культура")) return "culture";
+  if (f.includes("autos/")) return "autos";
+  return "main";
+}
+
 export function getLocalImageUrl(event: {
   date: string;
   url: string;
   sourceFile?: string;
 }): string | undefined {
-  const isCulture =
-    event.sourceFile?.toLowerCase().includes("culture") ||
-    event.sourceFile?.toLowerCase().includes("культура");
-  const manifest = isCulture
-    ? (cultureManifest as Record<string, string>)
-    : (mainManifest as Record<string, string>);
-  const filenameToUrl = isCulture ? cultureFilenameToUrl : mainFilenameToUrl;
+  const kind = getPicsKind(event.sourceFile);
+  const manifest =
+    kind === "culture"
+      ? (cultureManifest as Record<string, string>)
+      : kind === "autos"
+        ? (autosManifest as Record<string, string>)
+        : (mainManifest as Record<string, string>);
+  const filenameToUrl =
+    kind === "culture"
+      ? cultureFilenameToUrl
+      : kind === "autos"
+        ? autosFilenameToUrl
+        : mainFilenameToUrl;
 
   // Manifest first: exact file (e.g. .svg) avoids broken .webp with wrong content
   const key = `${event.date}|${normalizeUrl(event.url)}`;

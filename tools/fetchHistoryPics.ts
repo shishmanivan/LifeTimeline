@@ -120,6 +120,7 @@ function getExtensionFromUrl(url: string): string {
   try {
     const pathname = new URL(url).pathname.toLowerCase();
     if (pathname.endsWith(".webp")) return ".webp";
+    if (pathname.endsWith(".jfif")) return ".jfif";
     if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return ".jpg";
     if (pathname.endsWith(".png")) return ".png";
     if (pathname.endsWith(".svg")) return ".svg";
@@ -302,7 +303,7 @@ async function main(): Promise<void> {
     const manualIsSvg =
       manualImage.length > 0 &&
       (manualImage.toLowerCase().endsWith(".svg") || (manualImage.startsWith("http") && getExtensionFromUrl(manualImage) === ".svg"));
-    const existingIsRaster = existing ? /\.(webp|jpg|jpeg|png)$/i.test(existing) : false;
+    const existingIsRaster = existing ? /\.(webp|jpg|jpeg|jfif|png)$/i.test(existing) : false;
     const skipExisting = existing && filePath && fs.existsSync(filePath) && !(manualIsSvg && existingIsRaster);
     if (skipExisting) {
       stats.hit++;
@@ -310,7 +311,7 @@ async function main(): Promise<void> {
     }
 
     const hasManualImage = manualImage.length > 0;
-    const hasRasterOnDisk = fs.readdirSync(PICS_DIR).some((f) => f.startsWith(row.date) && f !== "_manifest.json" && /\.(webp|jpg|jpeg|png)$/i.test(f));
+    const hasRasterOnDisk = fs.readdirSync(PICS_DIR).some((f) => f.startsWith(row.date) && f !== "_manifest.json" && /\.(webp|jpg|jpeg|jfif|png)$/i.test(f));
     const shouldUpgradeToSvg = manualIsSvg && (existingIsRaster || hasRasterOnDisk);
 
     if (usedDates.has(row.date) && !shouldUpgradeToSvg) {
@@ -338,7 +339,7 @@ async function main(): Promise<void> {
           continue;
         }
         if (ext === ".svg" && usedDates.has(row.date)) {
-          const rasterFiles = fs.readdirSync(PICS_DIR).filter((f) => f.startsWith(row.date) && /\.(webp|jpg|jpeg|png)$/i.test(f));
+          const rasterFiles = fs.readdirSync(PICS_DIR).filter((f) => f.startsWith(row.date) && /\.(webp|jpg|jpeg|jfif|png)$/i.test(f));
           for (const f of rasterFiles) {
             fs.unlinkSync(path.join(PICS_DIR, f));
             usedDates.delete(row.date);

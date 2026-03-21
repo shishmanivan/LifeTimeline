@@ -15,7 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PICS_DIR = path.resolve(__dirname, "..", "src", "history", "HistoryPics");
 const MANIFEST_PATH = path.join(PICS_DIR, "_manifest.json");
 
-const SUFFIX_REGEX = /^(\d{4}-\d{2}-\d{2})_(\d+)\.(webp|jpg|jpeg|png|avif|svg)$/i;
+const SUFFIX_REGEX = /^(\d{4}-\d{2}-\d{2})_(\d+)\.(webp|jpg|jpeg|jfif|png|avif|svg)$/i;
 
 function main(): void {
   if (!fs.existsSync(PICS_DIR)) {

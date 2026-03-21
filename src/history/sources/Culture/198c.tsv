@@ -5,7 +5,6 @@ date	en_url	image	en_title	ru_title	ru_url
 1989-03-21	https://en.wikipedia.org/wiki/Like_a_Prayer_(album)		Like a Prayer released by Madonna	Выходит альбом Like a Prayer (Madonna)	https://ru.wikipedia.org/wiki/Like_a_Prayer
 1989-04-17	https://en.wikipedia.org/wiki/Doolittle_(Pixies_album)		Doolittle released by Pixies	Выходит альбом Doolittle (Pixies)	https://ru.wikipedia.org/wiki/Doolittle
 1989-05-02	https://en.wikipedia.org/wiki/Disintegration_(The_Cure_album)		Disintegration released by The Cure	Выходит альбом Disintegration (The Cure)	https://ru.wikipedia.org/wiki/Disintegration
-1989-05-02	https://en.wikipedia.org/wiki/The_Stone_Roses_(album)		The Stone Roses released by The Stone Roses	Выходит альбом The Stone Roses	https://ru.wikipedia.org/wiki/The_Stone_Roses_(альбом)
 1989-07-05	https://en.wikipedia.org/wiki/Seinfeld		Seinfeld premieres	Премьера сериала Сайнфелд	https://ru.wikipedia.org/wiki/Сайнфелд
 1989-10-19	https://en.wikipedia.org/wiki/Camilo_José_Cela		Camilo José Cela awarded Nobel Prize in Literature	Камило Хосе Села получает Нобелевскую премию по литературе	https://ru.wikipedia.org/wiki/Села,_Камило_Хосе
 1989-04-16	https://en.wikipedia.org/wiki/J._R._R._Tolkien		J. R. R. Tolkien dies	Умер Джон Рональд Руэл Толкин	https://ru.wikipedia.org/wiki/Толкин,_Джон_Рональд_Руэл
@@ -38,7 +37,6 @@ date	en_url	image	en_title	ru_title	ru_url
 1985-03-25	https://en.wikipedia.org/wiki/Amadeus_(film)		Amadeus wins Best Picture	Амадей получает Оскар за лучший фильм	https://ru.wikipedia.org/wiki/Амадей_(фильм)
 1985-05-24	https://en.wikipedia.org/wiki/Papa_is_on_Trip		Papa is on a Business Trip wins Palme d'Or	Папа в командировке получает Золотую пальмовую ветвь	https://ru.wikipedia.org/wiki/Папа_в_командировке
 1985-07-03	https://en.wikipedia.org/wiki/Back_to_the_Future		Back to the Future premieres	Премьера фильма Назад в будущее	https://ru.wikipedia.org/wiki/Назад_в_будущее
-1985-07-24	https://en.wikipedia.org/wiki/Rambo:_First_Blood_Part_II		Rambo: First Blood Part II premieres	Премьера фильма Рэмбо: Первая кровь 2	https://ru.wikipedia.org/wiki/Рэмбо:_Первая_кровь_2
 1985-05-13	https://en.wikipedia.org/wiki/Brothers_in_Arms_(album)		Brothers in Arms released by Dire Straits	Выходит альбом Brothers in Arms (Dire Straits)	https://ru.wikipedia.org/wiki/Brothers_in_Arms
 1985-07-13	https://en.wikipedia.org/wiki/Live_Aid		Live Aid concert held	Концерт Live Aid	https://ru.wikipedia.org/wiki/Live_Aid
 1985-10-17	https://en.wikipedia.org/wiki/Claude_Simon		Claude Simon awarded Nobel Prize in Literature	Клод Симон получает Нобелевскую премию по литературе	https://ru.wikipedia.org/wiki/Симон,_Клод
@@ -81,7 +79,20 @@ date	en_url	image	en_title	ru_title	ru_url
 1980-07-25	https://en.wikipedia.org/wiki/AC/DC		Back in Black released by AC/DC	Выходит альбом Back in Black (AC/DC)	https://ru.wikipedia.org/wiki/Back_in_Black
 1980-10-09	https://en.wikipedia.org/wiki/Czes%C5%82aw_Mi%C5%82osz		Czesław Miłosz awarded Nobel Prize in Literature	Чеслав Милош получает Нобелевскую премию по литературе	https://ru.wikipedia.org/wiki/Милош,_Чеслав
 1985-10-17_2	https://en.wikipedia.org/wiki/Come_and_See		Come and See premieres	Премьера фильма Иди и смотри	https://ru.wikipedia.org/wiki/Иди_и_смотри
-
+1980-07-01	https://en.wikipedia.org/wiki/The_Name_of_the_Rose		Umberto Eco publishes The Name of the Rose	Опубликован роман Умберто Эко «Имя розы»	https://ru.wikipedia.org/wiki/Имя_розы
+1980-07-01_2	https://en.wikipedia.org/wiki/Waiting_for_the_Barbarians		J._M._Coetzee publishes Waiting for the Barbarians	Опубликован роман Дж. М. Кутзее «В ожидании варваров»	https://ru.wikipedia.org/wiki/В_ожидании_варваров
+1981-07-01	https://en.wikipedia.org/wiki/Midnight%27s_Children		Salman Rushdie publishes Midnight's Children	Опубликован роман Салмана Рушди «Дети полуночи»	https://ru.wikipedia.org/wiki/Дети_полуночи
+1982-07-01	https://en.wikipedia.org/wiki/The_House_of_the_Spirits		Isabel Allende publishes The House of the Spirits	Опубликован роман Исабель Альенде «Дом духов»	https://ru.wikipedia.org/wiki/Дом_духов
+1985-07-01	https://en.wikipedia.org/wiki/Love_in_the_Time_of_Cholera		Gabriel Garc%C3%ADa_M%C3%A1rquez publishes Love in the Time of Cholera	Опубликован роман Габриэля Гарсиа Маркеса «Любовь во время холеры»	https://ru.wikipedia.org/wiki/Любовь_во_время_холеры
+1987-09-01	https://en.wikipedia.org/wiki/Beloved_(novel)		Toni Morrison publishes Beloved	Опубликован роман Тони Моррисон «Возлюбленная»	https://ru.wikipedia.org/wiki/Возлюбленная_(роман)
+1989-07-01	https://en.wikipedia.org/wiki/The_Remains_of_the_Day		Kazuo_Ishiguro publishes The Remains of the Day	Опубликован роман Кадзуо Исигуро «Остаток дня»	https://ru.wikipedia.org/wiki/Остаток_дня
+1989-05-02_2	https://en.wikipedia.org/wiki/The_Stone_Roses_(album)		The Stone Roses released by The Stone Roses	Выходит альбом The Stone Roses	https://ru.wikipedia.org/wiki/The_Stone_Roses_(альбом)
+1980-08-12	https://en.wikipedia.org/wiki/Life_and_Fate		Vasily Grossman publishes Life and Fate	Опубликован роман Василия Гроссмана «Жизнь и судьба»	https://ru.wikipedia.org/wiki/Жизнь_и_судьба
+1970-04-01	https://en.wikipedia.org/wiki/Spiral_Jetty		Smithson creates Spiral Jetty	Смитсон создаёт «Спиральную дамбу»	https://ru.wikipedia.org/wiki/Спиральная_дамба
+1980-06-01	https://en.wikipedia.org/wiki/The_Times_Square_Show		Basquiat appears in The Times Square Show	Баския участвует в The Times Square Show	https://ru.wikipedia.org/wiki/Жан-Мишель_Баския
+1980-12-15	https://en.wikipedia.org/wiki/Keith_Haring		Haring begins his subway drawings	Харинг начинает свои subway drawings	https://ru.wikipedia.org/wiki/Харинг,_Кит
+1991-07-01	https://en.wikipedia.org/wiki/The_Physical_Impossibility_of_Death_in_the_Mind_of_Someone_Living		Hirst creates The Physical Impossibility of Death in the Mind of Someone Living	Херст создаёт «Физическую невозможность смерти в сознании живущего»	https://ru.wikipedia.org/wiki/Физическая_невозможность_смерти_в_сознании_живущего
+1997-09-18	https://en.wikipedia.org/wiki/Sensation_(art_exhibition)		Opening of the Sensation exhibition in London	Открытие выставки Sensation в Лондоне	https://ru.wikipedia.org/wiki/Sensation
 
 
 

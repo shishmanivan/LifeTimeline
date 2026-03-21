@@ -81,6 +81,7 @@ function getExtensionFromUrl(url: string): string {
   try {
     const pathname = new URL(url).pathname.toLowerCase();
     if (pathname.endsWith(".webp")) return ".webp";
+    if (pathname.endsWith(".jfif")) return ".jfif";
     if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return ".jpg";
     if (pathname.endsWith(".png")) return ".png";
     if (pathname.endsWith(".svg")) return ".svg";

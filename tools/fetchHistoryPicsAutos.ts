@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * Fetch images for Culture TSV sources into HistoryPics/Culture.
- * Downloads only events that are not already present in Culture manifest/folder.
+ * Fetch images for Autos TSV sources into HistoryPics/Autos.
+ * Downloads only events that are not already present in Autos manifest/folder.
+ * Same behavior as Culture; only paths differ.
  *
- * Usage: npm run history:pics:culture
- *        npm run history:pics:culture -- 198c.tsv   # only this file
- *        npm run history:pics:culture -- 199c.tsv 1995-07-01  # file + min date (YYYY-MM-DD)
- *        npm run history:pics:culture -- 189c.tsv --from-line 22  # from 1-based line (header = line 1)
+ * Usage: npm run history:pics:autos
+ *        npm run history:pics:autos -- my.tsv   # only this file
+ *        npm run history:pics:autos -- my.tsv 1970-01-01 1989-12-31  # min + max date (inclusive)
+ *        npm run history:pics:autos -- my.tsv 1995-07-01  # file + min date only (YYYY-MM-DD)
+ *        npm run history:pics:autos -- my.tsv --from-line 22  # from 1-based line (header = line 1)
  */
 
 import fs from "fs";
@@ -15,13 +17,13 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const SOURCES_DIR = path.join(PROJECT_ROOT, "src", "history", "sources", "Culture");
-const PICS_DIR = path.join(PROJECT_ROOT, "src", "history", "HistoryPics", "Culture");
+const SOURCES_DIR = path.join(PROJECT_ROOT, "src", "history", "sources", "Autos");
+const PICS_DIR = path.join(PROJECT_ROOT, "src", "history", "HistoryPics", "Autos");
 const MANIFEST_PATH = path.join(PICS_DIR, "_manifest.json");
 const WIKI_API = "https://en.wikipedia.org/w/api.php";
 /** https://foundation.wikimedia.org/wiki/Policy:User-Agent_policy */
 const WIKI_FETCH_HEADERS: Record<string, string> = {
-  "User-Agent": "timeline-mvp/0.0.1 (Culture history thumbnails; private project)",
+  "User-Agent": "timeline-mvp/0.0.1 (Autos history thumbnails; private project)",
   Accept: "application/json",
 };
 /** YYYY-MM-DD or YYYY-MM-DD_2, _3… for same-day events (matches ingestHistory) */
@@ -224,7 +226,7 @@ async function downloadWithRetry(imageUrl: string, destPath: string): Promise<vo
         const waitMs = is429 ? RATE_LIMIT_WAIT_MS : RETRY_DELAY_MS;
         if (is429) {
           console.log(
-            `[historypics:culture] Download 429, waiting ${waitMs / 1000}s before retry ${attempt}/${RETRY_ATTEMPTS}`
+            `[historypics:autos] Download 429, waiting ${waitMs / 1000}s before retry ${attempt}/${RETRY_ATTEMPTS}`
           );
         }
         await sleep(waitMs);
@@ -250,14 +252,18 @@ function collectTsvFiles(dir: string, base = ""): string[] {
 }
 
 /** Extra CLI args after the optional file filter (argv[2]). */
-function parseScopeArgs(): { fromDate?: string; fromPhysicalLine?: number } {
+function parseScopeArgs(): {
+  fromDate?: string;
+  untilDate?: string;
+  fromPhysicalLine?: number;
+} {
   const args = process.argv.slice(3);
-  let fromDate: string | undefined;
+  const dates: string[] = [];
   let fromPhysicalLine: number | undefined;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (/^\d{4}-\d{2}-\d{2}$/.test(a)) {
-      fromDate = a;
+      dates.push(a);
       continue;
     }
     if (a === "--from-line" && args[i + 1]) {
@@ -272,7 +278,11 @@ function parseScopeArgs(): { fromDate?: string; fromPhysicalLine?: number } {
       if (Number.isFinite(n) && n >= 1) fromPhysicalLine = n;
     }
   }
-  return { fromDate, fromPhysicalLine };
+  return {
+    fromDate: dates[0],
+    untilDate: dates[1],
+    fromPhysicalLine,
+  };
 }
 
 function loadManifest(filePath: string): Manifest {
@@ -300,12 +310,12 @@ async function main(): Promise<void> {
   if (fileFilter) {
     tsvFiles = tsvFiles.filter((f) => f.endsWith(fileFilter) || path.basename(f) === fileFilter);
     if (tsvFiles.length === 0) {
-      console.error(`[historypics:culture] No TSV matching: ${fileFilter}`);
+      console.error(`[historypics:autos] No TSV matching: ${fileFilter}`);
       process.exit(1);
     }
-    console.log(`[historypics:culture] Filter: ${fileFilter} (${tsvFiles.length} file(s))\n`);
+    console.log(`[historypics:autos] Filter: ${fileFilter} (${tsvFiles.length} file(s))\n`);
   }
-  const { fromDate: fromDateArg, fromPhysicalLine } = parseScopeArgs();
+  const { fromDate: fromDateArg, untilDate: untilDateArg, fromPhysicalLine } = parseScopeArgs();
   const parseOpts = fromPhysicalLine != null ? { fromPhysicalLine } : undefined;
   const allRows: ParsedRow[] = [];
   for (const file of tsvFiles) {
@@ -314,7 +324,7 @@ async function main(): Promise<void> {
   }
   if (fromPhysicalLine != null) {
     console.log(
-      `[historypics:culture] From physical line >= ${fromPhysicalLine} in each TSV (${allRows.length} raw row(s) before dedup)\n`
+      `[historypics:autos] From physical line >= ${fromPhysicalLine} in each TSV (${allRows.length} raw row(s) before dedup)\n`
     );
   }
 
@@ -328,10 +338,17 @@ async function main(): Promise<void> {
   }
   let rows = Array.from(deduped.values());
 
-  if (fromDateArg) {
+  if (fromDateArg || untilDateArg) {
     const base = (d: string) => d.replace(/_\d+$/, "");
-    rows = rows.filter((r) => base(r.date) >= fromDateArg);
-    console.log(`[historypics:culture] From date >= ${fromDateArg} (${rows.length} event(s) in scope)\n`);
+    if (fromDateArg) rows = rows.filter((r) => base(r.date) >= fromDateArg);
+    if (untilDateArg) rows = rows.filter((r) => base(r.date) <= untilDateArg);
+    const range =
+      fromDateArg && untilDateArg
+        ? `${fromDateArg} … ${untilDateArg}`
+        : fromDateArg
+          ? `>= ${fromDateArg}`
+          : `<= ${untilDateArg}`;
+    console.log(`[historypics:autos] Date range ${range} (${rows.length} event(s) in scope)\n`);
   }
 
   const usedDates = new Set<string>();
@@ -403,7 +420,7 @@ async function main(): Promise<void> {
       }
 
       if (!imageUrl) {
-        console.log(`[historypics:culture] SKIP_MANUAL_IMAGE ${key}`);
+        console.log(`[historypics:autos] SKIP_MANUAL_IMAGE ${key}`);
         stats.skippedManual++;
         continue;
       }
@@ -437,10 +454,10 @@ async function main(): Promise<void> {
         usedDates.add(row.date);
         manifestChanged = true;
         stats.downloadedManual++;
-        console.log(`[historypics:culture] DOWNLOADED_MANUAL ${key} -> ${filename}`);
+        console.log(`[historypics:autos] DOWNLOADED_MANUAL ${key} -> ${filename}`);
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        console.log(`[historypics:culture] FAIL_DOWNLOAD ${key}: ${errMsg}`);
+        console.log(`[historypics:autos] FAIL_DOWNLOAD ${key}: ${errMsg}`);
         stats.failed++;
       }
       continue;
@@ -457,11 +474,11 @@ async function main(): Promise<void> {
         const errMsg = e instanceof Error ? e.message : String(e);
         if (errMsg.includes("429") && attempt < RETRY_ATTEMPTS) {
           console.log(
-            `[historypics:culture] RATE_LIMITED, waiting ${RATE_LIMIT_WAIT_MS / 1000}s before retry ${attempt}/${RETRY_ATTEMPTS}`
+            `[historypics:autos] RATE_LIMITED, waiting ${RATE_LIMIT_WAIT_MS / 1000}s before retry ${attempt}/${RETRY_ATTEMPTS}`
           );
           await sleep(RATE_LIMIT_WAIT_MS);
         } else {
-          console.log(`[historypics:culture] FAIL_FETCH ${key}: ${errMsg}`);
+          console.log(`[historypics:autos] FAIL_FETCH ${key}: ${errMsg}`);
           stats.failed++;
           wikiFetchError = true;
         }
@@ -470,7 +487,7 @@ async function main(): Promise<void> {
 
     if (!thumbnailUrl) {
       if (wikiFetchError) continue;
-      console.log(`[historypics:culture] SKIP_NO_WIKI_IMAGE ${key}`);
+      console.log(`[historypics:autos] SKIP_NO_WIKI_IMAGE ${key}`);
       stats.skippedNoWikiImage++;
       continue;
     }
@@ -492,10 +509,10 @@ async function main(): Promise<void> {
       usedDates.add(row.date);
       manifestChanged = true;
       stats.downloaded++;
-      console.log(`[historypics:culture] saved ${filename}`);
+      console.log(`[historypics:autos] saved ${filename}`);
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      console.log(`[historypics:culture] FAIL_DOWNLOAD ${key}: ${errMsg}`);
+      console.log(`[historypics:autos] FAIL_DOWNLOAD ${key}: ${errMsg}`);
       stats.failed++;
     }
   }
@@ -504,7 +521,7 @@ async function main(): Promise<void> {
     fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2), "utf-8");
   }
 
-  console.log("\n--- Culture Summary ---");
+  console.log("\n--- Autos Summary ---");
   console.log(`totalEvents: ${stats.totalEvents}`);
   console.log(`downloaded: ${stats.downloaded}`);
   console.log(`downloadedManual: ${stats.downloadedManual}`);
