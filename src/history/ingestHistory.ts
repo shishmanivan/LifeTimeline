@@ -123,12 +123,15 @@ function needsEnrich(
   const urlMatch = (row.ruUrl || row.url) === existing.url;
   const sourceMatch = existing.sourceFile === sourceFile;
   const sourceLineMatch = existing.sourceLine === row.sourceLine;
+  const enWikiExpected = row.ruUrl?.trim() ? row.url : undefined;
+  const enWikiMatch = (existing.enWikiUrl ?? "") === (enWikiExpected ?? "");
   return (
     !titleMatch ||
     !langMatch ||
     !urlMatch ||
     !sourceMatch ||
-    !sourceLineMatch
+    !sourceLineMatch ||
+    !enWikiMatch
   );
 }
 
@@ -218,6 +221,7 @@ async function runHistoryIngestInternal(): Promise<void> {
       const idStr = `${row.date}|${row.url}`;
       const id = await sha1(idStr);
       const displayUrl = row.ruUrl || row.url;
+      const enWikiUrl = row.ruUrl?.trim() ? row.url : undefined;
 
       const existing = await getHistoricalEvent(id);
       if (!needsEnrich(existing, row, sourceFile)) return null;
@@ -236,6 +240,7 @@ async function runHistoryIngestInternal(): Promise<void> {
         updatedAt: new Date().toISOString(),
         importance: 3,
         ruUrl: displayUrl.startsWith("https://ru.wikipedia") ? undefined : row.ruUrl,
+        enWikiUrl,
       };
       return ev;
     });

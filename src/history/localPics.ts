@@ -88,6 +88,7 @@ export function getLocalImageUrl(event: {
   date: string;
   url: string;
   sourceFile?: string;
+  enWikiUrl?: string;
 }): string | undefined {
   const kind = getPicsKind(event.sourceFile);
   const manifest =
@@ -103,15 +104,23 @@ export function getLocalImageUrl(event: {
         ? autosFilenameToUrl
         : mainFilenameToUrl;
 
-  // Manifest first: exact file (e.g. .svg) avoids broken .webp with wrong content
-  const key = `${event.date}|${normalizeUrl(event.url)}`;
-  const filename = manifest[key];
-  if (filename) {
-    const exact = filenameToUrl.get(filename);
-    if (exact) return exact;
-    const base = filename.includes(".") ? filename.replace(/\.[^.]+$/, "") : filename;
-    const byManifest = tryByBaseName(base, filenameToUrl);
-    if (byManifest) return byManifest;
+  const urlCandidates = [event.url, event.enWikiUrl].filter(
+    (u): u is string => typeof u === "string" && u.startsWith("http")
+  );
+  const seenNorm = new Set<string>();
+  for (const u of urlCandidates) {
+    const norm = normalizeUrl(u);
+    if (seenNorm.has(norm)) continue;
+    seenNorm.add(norm);
+    const key = `${event.date}|${norm}`;
+    const filename = manifest[key];
+    if (filename) {
+      const exact = filenameToUrl.get(filename);
+      if (exact) return exact;
+      const base = filename.includes(".") ? filename.replace(/\.[^.]+$/, "") : filename;
+      const byManifest = tryByBaseName(base, filenameToUrl);
+      if (byManifest) return byManifest;
+    }
   }
   const byDate = tryByBaseName(event.date, filenameToUrl);
   if (byDate) return byDate;

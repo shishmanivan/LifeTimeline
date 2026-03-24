@@ -300,6 +300,7 @@ const HISTORICAL_WHITELIST: (keyof HistoricalEvent)[] = [
   "updatedAt",
   "importance",
   "ruUrl",
+  "enWikiUrl",
   "laneIndex",
 ];
 

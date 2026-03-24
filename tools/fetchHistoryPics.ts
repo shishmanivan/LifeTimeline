@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * Fetch historical event images from Wikipedia and save to HistoryPics.
- * One file per date: YYYY-MM-DD.ext only. Never creates _2, _3, _4.
+ * Filenames: YYYY-MM-DD.ext or YYYY-MM-DD_2.ext, _3… for same calendar day (matches ingestHistory).
  * Idempotent: re-run does not re-download.
  *
- * IMPORTANT: Pause OneDrive sync before running (OneDrive can create _2 copies on conflict).
+ * IMPORTANT: Pause OneDrive sync before running (OneDrive can create stray _N copies on conflict).
  * Usage: npm run history:pics
  */
 
@@ -18,7 +18,8 @@ const SOURCES_DIR = path.join(PROJECT_ROOT, "src", "history", "sources");
 const PICS_DIR = path.join(PROJECT_ROOT, "src", "history", "HistoryPics");
 const MANIFEST_PATH = path.join(PICS_DIR, "_manifest.json");
 const WIKI_API = "https://en.wikipedia.org/w/api.php";
-const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+/** YYYY-MM-DD or YYYY-MM-DD_2, _3… for same-day events (matches ingestHistory) */
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}(_\d+)?$/;
 const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 500;
 const REQUEST_DELAY_MS = 1200;
@@ -130,11 +131,11 @@ function getExtensionFromUrl(url: string): string {
   return ".webp";
 }
 
-/** One file per date. Never creates _2, _3, _4. */
 function filenameForDate(date: string, ext = ".webp"): string {
-  const name = `${date}${ext}`;
-  if (/_[234]\b/.test(name)) throw new Error(`BUG: filename must not contain _2/_3/_4: ${name}`);
-  return name;
+  if (!/^\d{4}-\d{2}-\d{2}(_\d+)?$/.test(date)) {
+    throw new Error(`BUG: invalid date for filename: ${date}`);
+  }
+  return `${date}${ext}`;
 }
 
 function isHttpUrl(s: string): boolean {
@@ -170,8 +171,8 @@ function sleep(ms: number): Promise<void> {
 
 async function downloadAndSave(imageUrl: string, destPath: string): Promise<void> {
   const filename = path.basename(destPath);
-  if (filename.includes("_2") || filename.includes("_3") || filename.includes("_4")) {
-    throw new Error(`BUG: refusing to write filename with _2/_3/_4: ${filename}`);
+  if (!/^\d{4}-\d{2}-\d{2}(?:_\d+)?\.[a-z0-9]+$/i.test(filename)) {
+    throw new Error(`BUG: unexpected image filename: ${filename}`);
   }
   if (fs.existsSync(destPath)) throw new Error(`File exists, refusing to overwrite: ${destPath}`);
   const res = await fetch(imageUrl, { mode: "cors" });
@@ -217,7 +218,9 @@ async function main(): Promise<void> {
       const date = key.slice(0, pipe);
       const url = key.slice(pipe + 1);
       const normKey = eventKey(date, url);
-      const baseName = filename.replace(/_\d+(\.[^.]+)$/, "$1");
+      const baseName = /_\d+$/.test(date)
+        ? filename
+        : filename.replace(/_\d+(\.[^.]+)$/, "$1");
       if (!migrated[normKey]) migrated[normKey] = baseName;
     }
     const needsMigration =
@@ -234,15 +237,19 @@ async function main(): Promise<void> {
     }
   }
 
+  const datePrefixFromFilename = (fn: string): string | undefined => {
+    const m = fn.match(/^(\d{4}-\d{2}-\d{2}(?:_\d+)?)\./);
+    return m?.[1];
+  };
   const usedDates = new Set<string>();
   for (const fn of Object.values(manifest)) {
-    const m = fn.match(/^(\d{4}-\d{2}-\d{2})/);
-    if (m) usedDates.add(m[1]);
+    const p = datePrefixFromFilename(fn);
+    if (p) usedDates.add(p);
   }
   for (const f of fs.readdirSync(PICS_DIR)) {
     if (f === "_manifest.json") continue;
-    const m = f.match(/^(\d{4}-\d{2}-\d{2})/);
-    if (m) usedDates.add(m[1]);
+    const p = datePrefixFromFilename(f);
+    if (p) usedDates.add(p);
   }
 
   function findTsvFiles(dir: string, base = ""): string[] {
@@ -311,7 +318,9 @@ async function main(): Promise<void> {
     }
 
     const hasManualImage = manualImage.length > 0;
-    const hasRasterOnDisk = fs.readdirSync(PICS_DIR).some((f) => f.startsWith(row.date) && f !== "_manifest.json" && /\.(webp|jpg|jpeg|jfif|png)$/i.test(f));
+    const hasRasterOnDisk = fs.readdirSync(PICS_DIR).some(
+      (f) => f.startsWith(`${row.date}.`) && f !== "_manifest.json" && /\.(webp|jpg|jpeg|jfif|png)$/i.test(f)
+    );
     const shouldUpgradeToSvg = manualIsSvg && (existingIsRaster || hasRasterOnDisk);
 
     if (usedDates.has(row.date) && !shouldUpgradeToSvg) {
@@ -339,7 +348,9 @@ async function main(): Promise<void> {
           continue;
         }
         if (ext === ".svg" && usedDates.has(row.date)) {
-          const rasterFiles = fs.readdirSync(PICS_DIR).filter((f) => f.startsWith(row.date) && /\.(webp|jpg|jpeg|jfif|png)$/i.test(f));
+          const rasterFiles = fs.readdirSync(PICS_DIR).filter(
+            (f) => f.startsWith(`${row.date}.`) && /\.(webp|jpg|jpeg|jfif|png)$/i.test(f)
+          );
           for (const f of rasterFiles) {
             fs.unlinkSync(path.join(PICS_DIR, f));
             usedDates.delete(row.date);
