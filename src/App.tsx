@@ -322,10 +322,9 @@ function App() {
   const [layersModalOpen, setLayersModalOpen] = useState(false);
   const [visibleLayers, setVisibleLayers] = useState<Set<string>>(() => {
     const ids = LAYERS.map((l) => l.id) as string[];
-    const saved = persisted.visibleLayers;
-    if (Array.isArray(saved) && saved.length > 0) {
-      const valid = saved.filter((id) => ids.includes(id));
-      if (valid.length > 0) return new Set(valid);
+    if ("visibleLayers" in persisted && Array.isArray(persisted.visibleLayers)) {
+      const valid = persisted.visibleLayers.filter((id) => ids.includes(id));
+      return new Set(valid);
     }
     return new Set(ids);
   });
