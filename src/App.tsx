@@ -40,6 +40,7 @@ import {
 } from "./HistoricalLayer";
 import { HistoricalEventModal } from "./HistoricalEventModal";
 import { PersonalPhotoModal } from "./PersonalPhotoModal";
+import { DataBackupModal } from "./DataBackupModal";
 
 export type { Offsets };
 
@@ -126,6 +127,7 @@ const LAYERS = [
   { id: "main", title: "Основные мировые события" },
   { id: "culture", title: "Культура и искусство" },
   { id: "autos", title: "Автомобили" },
+  { id: "tech", title: "Техника и технологии" },
 ] as const;
 
 const TIMELINE_STATE_KEY = "timeline-mvp-state";
@@ -161,6 +163,7 @@ function getEventLayerId(event: { sourceFile: string }): string {
   const f = event.sourceFile.toLowerCase().replace(/\\/g, "/");
   if (f.includes("culture") || f.includes("культура")) return "culture";
   if (f.includes("autos/") || f.startsWith("autos/")) return "autos";
+  if (f.includes("tech/") || f.startsWith("tech/")) return "tech";
   return "main";
 }
 
@@ -320,6 +323,7 @@ function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [gotoDateModalOpen, setGotoDateModalOpen] = useState(false);
   const [layersModalOpen, setLayersModalOpen] = useState(false);
+  const [dataBackupModalOpen, setDataBackupModalOpen] = useState(false);
   const [visibleLayers, setVisibleLayers] = useState<Set<string>>(() => {
     const ids = LAYERS.map((l) => l.id) as string[];
     if ("visibleLayers" in persisted && Array.isArray(persisted.visibleLayers)) {
@@ -471,6 +475,17 @@ function App() {
       }
     }
   }, []);
+
+  const handleBackupImportDone = useCallback(() => {
+    loadPhotosFromDb().catch((err) => console.error("[photos] reload after import", err));
+    getAllSeries().then((series) => {
+      const map: Record<string, string> = {};
+      series.forEach((s) => {
+        map[s.id] = s.title;
+      });
+      setSeriesMap(map);
+    });
+  }, [loadPhotosFromDb]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1815,6 +1830,14 @@ function App() {
           <button
             type="button"
             className="top-bar-btn"
+            onClick={() => setDataBackupModalOpen(true)}
+            title="Сохранить подписи и фото в файлы на диск"
+          >
+            Резервная копия…
+          </button>
+          <button
+            type="button"
+            className="top-bar-btn"
             onClick={() => setModalOpen(true)}
           >
             + Добавить фото
@@ -1847,6 +1870,13 @@ function App() {
           visibleLayers={visibleLayers}
           onToggle={toggleLayer}
           onClose={() => setLayersModalOpen(false)}
+        />
+      )}
+
+      {dataBackupModalOpen && (
+        <DataBackupModal
+          onClose={() => setDataBackupModalOpen(false)}
+          onImportDone={handleBackupImportDone}
         />
       )}
 

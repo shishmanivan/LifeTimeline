@@ -8,3 +8,6 @@ dist
 
 # History images (thousands of files, fetched by npm run history:pics)
 src/history/HistoryPics/
+
+# Personal timeline export (photos + captions); create via «Резервная копия» in the app
+timeline-user-data/

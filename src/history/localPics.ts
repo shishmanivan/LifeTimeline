@@ -6,11 +6,13 @@
  * Main layer reads only from `HistoryPics/`.
  * Culture layer reads only from `HistoryPics/Culture/`.
  * Autos layer reads only from `HistoryPics/Autos/`.
+ * Tech layer reads only from `HistoryPics/Tech/`.
  */
 
 import mainManifest from "./HistoryPics/_manifest.json";
 import cultureManifest from "./HistoryPics/Culture/_manifest.json";
 import autosManifest from "./HistoryPics/Autos/_manifest.json";
+import techManifest from "./HistoryPics/Tech/_manifest.json";
 
 /** Must match fetchHistoryPics: normalize URL for consistent manifest lookup */
 function normalizeUrl(url: string): string {
@@ -44,6 +46,11 @@ const autosPicModules = import.meta.glob<string>(
   { eager: true, import: "default" }
 );
 
+const techPicModules = import.meta.glob<string>(
+  "./HistoryPics/Tech/*.{png,jpg,jpeg,jfif,webp,avif,svg}",
+  { eager: true, import: "default" }
+);
+
 const mainFilenameToUrl = new Map<string, string>();
 for (const [modulePath, url] of Object.entries(mainPicModules)) {
   const filename = modulePath.replace(/^.*[/\\]/, "");
@@ -62,6 +69,12 @@ for (const [modulePath, url] of Object.entries(autosPicModules)) {
   autosFilenameToUrl.set(filename, url);
 }
 
+const techFilenameToUrl = new Map<string, string>();
+for (const [modulePath, url] of Object.entries(techPicModules)) {
+  const filename = modulePath.replace(/^.*[/\\]/, "");
+  techFilenameToUrl.set(filename, url);
+}
+
 const EXTENSIONS = [".webp", ".jpg", ".jpeg", ".jfif", ".png", ".avif", ".svg"];
 
 function tryByBaseName(
@@ -75,12 +88,13 @@ function tryByBaseName(
   return undefined;
 }
 
-type PicsKind = "main" | "culture" | "autos";
+type PicsKind = "main" | "culture" | "autos" | "tech";
 
 function getPicsKind(sourceFile?: string): PicsKind {
   const f = (sourceFile ?? "").toLowerCase().replace(/\\/g, "/");
   if (f.includes("culture") || f.includes("культура")) return "culture";
   if (f.includes("autos/")) return "autos";
+  if (f.includes("tech/")) return "tech";
   return "main";
 }
 
@@ -96,12 +110,16 @@ export function getLocalImageUrl(event: {
       ? (cultureManifest as Record<string, string>)
       : kind === "autos"
         ? (autosManifest as Record<string, string>)
+        : kind === "tech"
+          ? (techManifest as Record<string, string>)
         : (mainManifest as Record<string, string>);
   const filenameToUrl =
     kind === "culture"
       ? cultureFilenameToUrl
       : kind === "autos"
         ? autosFilenameToUrl
+        : kind === "tech"
+          ? techFilenameToUrl
         : mainFilenameToUrl;
 
   const urlCandidates = [event.url, event.enWikiUrl].filter(
