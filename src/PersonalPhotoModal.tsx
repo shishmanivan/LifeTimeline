@@ -5,6 +5,7 @@ export type PersonalPhotoForModal = {
   title: string;
   date: string;
   note?: string;
+  seriesId?: string;
 };
 
 export type PhotoInSeriesForModal = {
@@ -35,11 +36,20 @@ type PersonalPhotoModalProps = {
   onNavigate: (photoId: string) => void;
   onStartLinking: () => void;
   onConfirmLink: (targetPhotoId: string, seriesId: string | null) => void;
+  onUnlinkFromSeries: (id: string) => void;
   onCancelLink: () => void;
   onCloseLinkPrompt: () => void;
   existingSeries: { id: string; title: string }[];
-  onDeletePhoto: (id: string) => void;
-  onDeleteAllPhotosInDay: () => void;
+  onDeletePhoto: (id: string) => boolean | Promise<boolean>;
+  onDeleteAllPhotosInDay: () => boolean | Promise<boolean>;
+  disableNonMetadataActions?: boolean;
+  allowReplacePhoto?: boolean;
+  allowDeletePhoto?: boolean;
+  allowAddPhotoToDay?: boolean;
+  allowDeleteAllPhotosInDay?: boolean;
+  allowSeriesLinking?: boolean;
+  allowSeriesUnlinking?: boolean;
+  disabledActionsMessage?: string;
 };
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -70,11 +80,20 @@ export function PersonalPhotoModal({
   onNavigate,
   onStartLinking,
   onConfirmLink,
+  onUnlinkFromSeries,
   onCancelLink,
   onCloseLinkPrompt,
   existingSeries,
   onDeletePhoto,
   onDeleteAllPhotosInDay,
+  disableNonMetadataActions = false,
+  allowReplacePhoto = false,
+  allowDeletePhoto = false,
+  allowAddPhotoToDay = false,
+  allowDeleteAllPhotosInDay = false,
+  allowSeriesLinking = false,
+  allowSeriesUnlinking = false,
+  disabledActionsMessage = "Server mode: image/add/delete actions are still disabled for now",
 }: PersonalPhotoModalProps) {
   const [linkStep, setLinkStep] = useState<"confirm" | "chooseSeries">("confirm");
   const [draftDate, setDraftDate] = useState("");
@@ -110,17 +129,26 @@ export function PersonalPhotoModal({
     }
   }, [isOpen, handleEscape]);
 
-  const handleDeleteThisPhoto = useCallback(() => {
-    if (photo) {
-      onDeletePhoto(photo.id);
+  const handleDeleteThisPhoto = useCallback(async () => {
+    if (!photo) return;
+    const deleted = await onDeletePhoto(photo.id);
+    if (deleted) {
       onClose();
     }
   }, [photo, onDeletePhoto, onClose]);
 
-  const handleDeleteAllInDay = useCallback(() => {
-    onDeleteAllPhotosInDay();
-    onClose();
+  const handleDeleteAllInDay = useCallback(async () => {
+    const deleted = await onDeleteAllPhotosInDay();
+    if (deleted) {
+      onClose();
+    }
   }, [onDeleteAllPhotosInDay, onClose]);
+
+  const handleUnlinkSeries = useCallback(() => {
+    if (photo) {
+      onUnlinkFromSeries(photo.id);
+    }
+  }, [photo, onUnlinkFromSeries]);
 
   const handleSave = useCallback(() => {
     if (photo) {
@@ -458,12 +486,23 @@ export function PersonalPhotoModal({
                   />
                 </div>
                 <div className="personal-modal-edit-actions">
+                  {disableNonMetadataActions && (
+                    <p className="personal-readonly-note personal-readonly-note-compact">
+                      {disabledActionsMessage}
+                    </p>
+                  )}
                   {!hasStartedEditing && (
                     <>
                       <button
                         type="button"
                         className="personal-modal-btn personal-modal-btn-secondary"
                         onClick={handleReplaceImage}
+                        disabled={!allowReplacePhoto}
+                        title={
+                          !allowReplacePhoto
+                            ? disabledActionsMessage
+                            : undefined
+                        }
                       >
                         Поменять фото
                       </button>
@@ -471,6 +510,12 @@ export function PersonalPhotoModal({
                         type="button"
                         className="personal-modal-btn personal-modal-btn-secondary"
                         onClick={handleAddPhotoToDay}
+                        disabled={!allowAddPhotoToDay}
+                        title={
+                          !allowAddPhotoToDay
+                            ? disabledActionsMessage
+                            : undefined
+                        }
                       >
                         Добавить фото в этот день
                       </button>
@@ -478,13 +523,40 @@ export function PersonalPhotoModal({
                         type="button"
                         className="personal-modal-btn personal-modal-btn-secondary"
                         onClick={onStartLinking}
+                        disabled={disableNonMetadataActions && !allowSeriesLinking}
+                        title={
+                          disableNonMetadataActions && !allowSeriesLinking
+                            ? disabledActionsMessage
+                            : undefined
+                        }
                       >
                         Связать фото
                       </button>
+                      {photo.seriesId && (
+                        <button
+                          type="button"
+                          className="personal-modal-btn personal-modal-btn-secondary"
+                          onClick={handleUnlinkSeries}
+                          disabled={disableNonMetadataActions && !allowSeriesUnlinking}
+                          title={
+                            disableNonMetadataActions && !allowSeriesUnlinking
+                              ? disabledActionsMessage
+                              : undefined
+                          }
+                        >
+                          Убрать из серии
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="personal-modal-btn personal-modal-btn-danger"
                         onClick={handleDeleteThisPhoto}
+                        disabled={!allowDeletePhoto}
+                        title={
+                          !allowDeletePhoto
+                            ? disabledActionsMessage
+                            : undefined
+                        }
                       >
                         Удалить это фото
                       </button>
@@ -492,6 +564,12 @@ export function PersonalPhotoModal({
                         type="button"
                         className="personal-modal-btn personal-modal-btn-danger"
                         onClick={handleDeleteAllInDay}
+                        disabled={!allowDeleteAllPhotosInDay}
+                        title={
+                          !allowDeleteAllPhotosInDay
+                            ? disabledActionsMessage
+                            : undefined
+                        }
                       >
                         Удалить все фото этого дня
                       </button>
@@ -505,22 +583,30 @@ export function PersonalPhotoModal({
                     Сохранить
                   </button>
                 </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="personal-modal-file-input"
-                  onChange={handleFileChange}
-                  aria-hidden
-                />
-                <input
-                  ref={addPhotoInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="personal-modal-file-input"
-                  onChange={handleAddPhotoFileChange}
-                  aria-hidden
-                />
+                {(allowReplacePhoto || allowAddPhotoToDay) && (
+                  <>
+                    {allowReplacePhoto && (
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="personal-modal-file-input"
+                        onChange={handleFileChange}
+                        aria-hidden
+                      />
+                    )}
+                    {allowAddPhotoToDay && (
+                      <input
+                        ref={addPhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="personal-modal-file-input"
+                        onChange={handleAddPhotoFileChange}
+                        aria-hidden
+                      />
+                    )}
+                  </>
+                )}
               </>
             ) : (
               <>
@@ -532,6 +618,11 @@ export function PersonalPhotoModal({
                   {photo.note || "—"}
                 </div>
                 <div className="personal-modal-footer">
+                  {disableNonMetadataActions && (
+                    <p className="personal-readonly-note personal-readonly-note-compact">
+                      {disabledActionsMessage}
+                    </p>
+                  )}
                   <button
                     type="button"
                     className="personal-modal-btn-edit"

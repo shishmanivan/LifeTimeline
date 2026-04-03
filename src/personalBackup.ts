@@ -4,15 +4,16 @@
  * Fallback: single JSON with base64 blobs (Safari / no directory picker).
  */
 
-import {
+import { localPersonalPhotoStorage } from "./localPersonalPhotoStorage";
+import type { PhotoRecord, SeriesRecord } from "./personalPhotoStorage";
+
+const {
   assignPersonalLaneIndex,
   getAllPhotos,
   getAllSeries,
   savePhoto,
   saveSeries,
-  type PhotoRecord,
-  type SeriesRecord,
-} from "./db";
+} = localPersonalPhotoStorage;
 
 export const BACKUP_DIR_NAME = "timeline-user-data";
 export const MANIFEST_FILE = "manifest.json";

@@ -1,0 +1,18 @@
+[Unit]
+Description=PastPresentYou personal photo backend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/pastpresentyou/app
+EnvironmentFile=/etc/pastpresentyou/personal-photo-backend.env
+ExecStart=/usr/bin/npm run personal:server
+Restart=always
+RestartSec=3
+
+# Replace with your deploy user/group.
+User=pastpresentyou
+Group=pastpresentyou
+
+[Install]
+WantedBy=multi-user.target

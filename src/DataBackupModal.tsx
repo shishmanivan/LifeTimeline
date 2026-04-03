@@ -10,12 +10,20 @@ import {
 type DataBackupModalProps = {
   onClose: () => void;
   onImportDone: () => void;
+  isReadOnly?: boolean;
+  readOnlyMessage?: string;
 };
 
-export function DataBackupModal({ onClose, onImportDone }: DataBackupModalProps) {
+export function DataBackupModal({
+  onClose,
+  onImportDone,
+  isReadOnly = false,
+  readOnlyMessage = "Server mode: read-only for now",
+}: DataBackupModalProps) {
   const dirOk = supportsDirectoryBackup();
 
   const handleExportFolder = async () => {
+    if (isReadOnly) return;
     const r = await exportBackupToPickedFolder();
     if (r.ok) {
       alert(
@@ -27,6 +35,7 @@ export function DataBackupModal({ onClose, onImportDone }: DataBackupModalProps)
   };
 
   const handleExportJson = async () => {
+    if (isReadOnly) return;
     const r = await exportBackupAsJsonDownload();
     if (r.ok) {
       alert(
@@ -38,6 +47,7 @@ export function DataBackupModal({ onClose, onImportDone }: DataBackupModalProps)
   };
 
   const handleImportFolder = async () => {
+    if (isReadOnly) return;
     if (!confirm("Импорт добавит и обновит фото и серии по id из резервной копии. Продолжить?")) {
       return;
     }
@@ -52,6 +62,7 @@ export function DataBackupModal({ onClose, onImportDone }: DataBackupModalProps)
   };
 
   const handlePickJson = () => {
+    if (isReadOnly) return;
     document.getElementById("personal-backup-json-input")?.click();
   };
 
@@ -59,6 +70,7 @@ export function DataBackupModal({ onClose, onImportDone }: DataBackupModalProps)
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
         <h2 className="modal-title">Резервная копия личных данных</h2>
+        {isReadOnly && <p className="personal-readonly-note">{readOnlyMessage}</p>}
         <p style={{ fontSize: 14, lineHeight: 1.5, margin: "0 0 16px", color: "#333" }}>
           Подписи к карточкам, длинные описания, даты, смещения, серии и сами изображения хранятся только в
           браузере (IndexedDB). Чтобы не потерять их при смене компьютера или профиля браузера, периодически
@@ -66,7 +78,14 @@ export function DataBackupModal({ onClose, onImportDone }: DataBackupModalProps)
           <code>…/Life Cursor 0.001/{BACKUP_DIR_NAME}</code>).
         </p>
         <div className="modal-field" style={{ flexDirection: "column", gap: 10 }}>
-          <button type="button" className="top-bar-btn" style={{ width: "100%" }} onClick={handleExportFolder}>
+          <button
+            type="button"
+            className="top-bar-btn"
+            style={{ width: "100%" }}
+            onClick={handleExportFolder}
+            disabled={isReadOnly}
+            title={isReadOnly ? readOnlyMessage : undefined}
+          >
             Сохранить в папку… (manifest + файлы)
           </button>
           {!dirOk && (
@@ -74,7 +93,14 @@ export function DataBackupModal({ onClose, onImportDone }: DataBackupModalProps)
               Запись в папку доступна в Chrome и Edge на HTTPS или localhost. Иначе используйте кнопку ниже.
             </p>
           )}
-          <button type="button" className="top-bar-btn" style={{ width: "100%" }} onClick={handleExportJson}>
+          <button
+            type="button"
+            className="top-bar-btn"
+            style={{ width: "100%" }}
+            onClick={handleExportJson}
+            disabled={isReadOnly}
+            title={isReadOnly ? readOnlyMessage : undefined}
+          >
             Скачать один JSON (все фото внутри файла)
           </button>
           <hr style={{ width: "100%", border: "none", borderTop: "1px solid #ddd", margin: "8px 0" }} />
@@ -83,11 +109,19 @@ export function DataBackupModal({ onClose, onImportDone }: DataBackupModalProps)
             className="top-bar-btn"
             style={{ width: "100%" }}
             onClick={handleImportFolder}
-            disabled={!dirOk}
+            disabled={isReadOnly || !dirOk}
+            title={isReadOnly ? readOnlyMessage : undefined}
           >
             Загрузить из папки…
           </button>
-          <button type="button" className="top-bar-btn" style={{ width: "100%" }} onClick={handlePickJson}>
+          <button
+            type="button"
+            className="top-bar-btn"
+            style={{ width: "100%" }}
+            onClick={handlePickJson}
+            disabled={isReadOnly}
+            title={isReadOnly ? readOnlyMessage : undefined}
+          >
             Загрузить из JSON-файла…
           </button>
         </div>
@@ -102,6 +136,10 @@ export function DataBackupModal({ onClose, onImportDone }: DataBackupModalProps)
           accept="application/json,.json"
           style={{ display: "none" }}
           onChange={async (ev) => {
+            if (isReadOnly) {
+              ev.target.value = "";
+              return;
+            }
             const file = ev.target.files?.[0];
             ev.target.value = "";
             if (!file) return;

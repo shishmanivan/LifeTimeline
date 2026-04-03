@@ -1,21 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  assignPersonalLaneIndex,
-  deletePhoto,
-  getAllPhotos,
-  getPhoto,
-  getAllSeries,
   getHistoricalEventsInRange,
-  savePhoto,
-  saveSeries,
-  updatePhotoOffsets,
-  updatePhotoMetadata,
-  updatePhotoImage,
-  updatePhotoSeriesId,
-  updatePhotoPreview,
-  type PhotoRecord,
-  type SeriesRecord,
 } from "./db";
+import {
+  personalPhotoStorage,
+  personalPhotoCapabilities,
+} from "./personalPhotoStorageSelector";
+import type { PhotoRecord } from "./personalPhotoStorage";
 import type { HistoricalEvent } from "./history/types";
 import { runHistoryIngest } from "./history/ingestHistory";
 import { generatePreviewBlob } from "./imagePreview";
@@ -43,6 +34,25 @@ import { PersonalPhotoModal } from "./PersonalPhotoModal";
 import { DataBackupModal } from "./DataBackupModal";
 
 export type { Offsets };
+
+const {
+  assignPersonalLaneIndex,
+  deletePhoto,
+  deletePhotosInDay,
+  getAllPhotos,
+  getAllSeries,
+  getPhoto,
+  savePhoto,
+  saveSeries,
+  updatePhotoImage,
+  updatePhotoMetadata,
+  updatePhotoOffsets,
+  updatePhotoPreview,
+  updatePhotoSeriesId,
+} = personalPhotoStorage;
+
+const PERSONAL_SERVER_DISABLED_WRITES_MESSAGE =
+  "Server mode: delete-all-in-day and backup writes are still disabled";
 
 type Scale = "30d" | "60d" | "90d" | "1y" | "2y" | "5y" | "10y";
 
@@ -302,6 +312,27 @@ function AddPhotoModal({ onClose, onSubmit }: AddPhotoModalProps) {
 }
 
 function App() {
+  const {
+    canAddPhoto,
+    canAddPhotoToDay,
+    canDeleteAllPhotosInDay,
+    canDeletePhoto,
+    canEditMetadata,
+    canEditOffsets,
+    canImportBackup,
+    canLinkSeries,
+    canReplacePhoto,
+    canUnlinkSeries,
+    canWritePreview,
+  } = personalPhotoCapabilities;
+  const hasRestrictedPersonalWrites =
+    !canAddPhoto ||
+    !canAddPhotoToDay ||
+    !canDeleteAllPhotosInDay ||
+    !canDeletePhoto ||
+    !canImportBackup ||
+    !canReplacePhoto ||
+    !canWritePreview;
   const persisted = useMemo(loadTimelineState, []);
 
   const [scaleIndex, setScaleIndex] = useState(() => {
@@ -457,35 +488,48 @@ function App() {
     });
     setPersonalPhotos(photos);
 
-    for (const r of records) {
-      if (r.showOnTimeline === false) continue;
-      if (r.previewBlob) continue;
-      try {
-        const previewBlob = await generatePreviewBlob(r.imageBlob);
-        await updatePhotoPreview(r.id, previewBlob);
-        const oldUrl = objectUrlsRef.current.get(r.id);
-        if (oldUrl) URL.revokeObjectURL(oldUrl);
-        const newImage = URL.createObjectURL(previewBlob);
-        objectUrlsRef.current.set(r.id, newImage);
-        setPersonalPhotos((prev) =>
-          prev.map((p) => (p.id === r.id ? { ...p, image: newImage } : p))
-        );
-      } catch {
-        /* keep original */
+    /* Policy-controlled preview writes: disabled in server mode. */
+    if (canWritePreview) {
+      for (const r of records) {
+        if (r.showOnTimeline === false) continue;
+        if (r.previewBlob) continue;
+        try {
+          const previewBlob = await generatePreviewBlob(r.imageBlob);
+          await updatePhotoPreview(r.id, previewBlob);
+          const oldUrl = objectUrlsRef.current.get(r.id);
+          if (oldUrl) URL.revokeObjectURL(oldUrl);
+          const newImage = URL.createObjectURL(previewBlob);
+          objectUrlsRef.current.set(r.id, newImage);
+          setPersonalPhotos((prev) =>
+            prev.map((p) => (p.id === r.id ? { ...p, image: newImage } : p))
+          );
+        } catch {
+          /* keep original */
+        }
       }
     }
+  }, [canWritePreview]);
+
+  const loadSeriesMapFromStorage = useCallback(async () => {
+    const series = await getAllSeries();
+    const map: Record<string, string> = {};
+    series.forEach((s) => {
+      map[s.id] = s.title;
+    });
+    setSeriesMap(map);
   }, []);
 
+  const refreshSeriesUiState = useCallback(async () => {
+    setHoveredPhotoId(null);
+    setHoveredSeriesId(null);
+    await Promise.all([loadPhotosFromDb(), loadSeriesMapFromStorage()]);
+  }, [loadPhotosFromDb, loadSeriesMapFromStorage]);
+
   const handleBackupImportDone = useCallback(() => {
-    loadPhotosFromDb().catch((err) => console.error("[photos] reload after import", err));
-    getAllSeries().then((series) => {
-      const map: Record<string, string> = {};
-      series.forEach((s) => {
-        map[s.id] = s.title;
-      });
-      setSeriesMap(map);
-    });
-  }, [loadPhotosFromDb]);
+    refreshSeriesUiState().catch((err) =>
+      console.error("[photos] reload after import", err)
+    );
+  }, [refreshSeriesUiState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -498,14 +542,10 @@ function App() {
   }, [loadPhotosFromDb]);
 
   useEffect(() => {
-    getAllSeries().then((series) => {
-      const map: Record<string, string> = {};
-      series.forEach((s) => {
-        map[s.id] = s.title;
-      });
-      setSeriesMap(map);
-    });
-  }, []);
+    loadSeriesMapFromStorage().catch((err) =>
+      console.error("[series] load failed", err)
+    );
+  }, [loadSeriesMapFromStorage]);
 
   useEffect(() => {
     setCenterDate((prev) => clampCenterToToday(prev, scale));
@@ -1252,87 +1292,80 @@ function App() {
     scheduleScrollStopRef.current();
   };
 
-  const handleAddPhoto = (file: File, date: string, caption: string) => {
+  const handleAddPhoto = async (file: File, date: string, caption: string) => {
+    if (!canAddPhoto) return;
     const safeDate = date > todayStr() ? todayStr() : date;
     const id = `photo-${Date.now()}`;
     imageBlobsRef.current.set(id, file);
-    generatePreviewBlob(file)
-      .then((previewBlob) => {
-        return getAllPhotos().then((all) => {
-          const newRecord: PhotoRecord = {
-            id,
-            title: caption || "Фото",
-            date: safeDate,
-            type: "personal",
-            imageBlob: file,
-            previewBlob,
-            offsetY: 0,
-            offsetXDays: 0,
-          };
-          const withLanes = assignPersonalLaneIndex([
-            ...all,
-            { ...newRecord, showOnTimeline: true },
-          ]);
-          const assigned = withLanes.find((r) => r.id === id);
-          newRecord.laneIndex = assigned?.laneIndex ?? 0;
-          return savePhoto(newRecord).then(() => {
-            const image = URL.createObjectURL(previewBlob);
-            objectUrlsRef.current.set(id, image);
-            setPersonalPhotos((prev) => [
-              ...prev,
-              {
-                id,
-                title: newRecord.title,
-                date: newRecord.date,
-                image,
-                offsetXDays: 0,
-                offsetY: 0,
-                laneIndex: newRecord.laneIndex,
-                note: newRecord.note,
-              },
-            ]);
-          });
-        });
+    let previewBlob: Blob | undefined;
+    try {
+      previewBlob = await generatePreviewBlob(file);
+    } catch {
+      previewBlob = undefined;
+    }
+
+    const existingRecordsForLaneAssignment: PhotoRecord[] = personalPhotos.map(
+      (photo) => ({
+        id: photo.id,
+        title: photo.title,
+        date: photo.date,
+        type: "personal",
+        imageBlob: new Blob(),
+        offsetY: photo.offsetY,
+        offsetXDays: photo.offsetXDays,
+        laneIndex: photo.laneIndex,
+        note: photo.note,
+        showOnTimeline: photo.showOnTimeline,
+        seriesId: photo.seriesId,
       })
-      .catch(() => {
-        getAllPhotos().then((all) => {
-          const newRecord: PhotoRecord = {
-            id,
-            title: caption || "Фото",
-            date: safeDate,
-            type: "personal",
-            imageBlob: file,
-            offsetY: 0,
-            offsetXDays: 0,
-          };
-          const withLanes = assignPersonalLaneIndex([
-            ...all,
-            { ...newRecord, showOnTimeline: true },
-          ]);
-          const assigned = withLanes.find((r) => r.id === id);
-          newRecord.laneIndex = assigned?.laneIndex ?? 0;
-          savePhoto(newRecord).then(() => {
-            const image = URL.createObjectURL(file);
-            objectUrlsRef.current.set(id, image);
-            setPersonalPhotos((prev) => [
-              ...prev,
-              {
-                id,
-                title: newRecord.title,
-                date: newRecord.date,
-                image,
-                offsetXDays: 0,
-                offsetY: 0,
-                laneIndex: newRecord.laneIndex,
-                note: newRecord.note,
-              },
-            ]);
-          });
-        });
-      });
+    );
+    const newRecord: PhotoRecord = {
+      id,
+      title: caption || "Фото",
+      date: safeDate,
+      type: "personal",
+      imageBlob: file,
+      previewBlob,
+      offsetY: 0,
+      offsetXDays: 0,
+      showOnTimeline: true,
+    };
+    const withLanes = assignPersonalLaneIndex([
+      ...existingRecordsForLaneAssignment,
+      newRecord,
+    ]);
+    const assigned = withLanes.find((r) => r.id === id);
+    newRecord.laneIndex = assigned?.laneIndex ?? 0;
+
+    try {
+      await savePhoto(newRecord);
+    } catch (err) {
+      imageBlobsRef.current.delete(id);
+      console.error("[add] save failed", err);
+      alert("Ошибка сохранения фото. Попробуйте ещё раз.");
+      return;
+    }
+
+    const image = URL.createObjectURL(previewBlob ?? file);
+    objectUrlsRef.current.set(id, image);
+    setPersonalPhotos((prev) => [
+      ...prev,
+      {
+        id,
+        title: newRecord.title,
+        date: newRecord.date,
+        image,
+        offsetXDays: 0,
+        offsetY: 0,
+        laneIndex: newRecord.laneIndex,
+        note: newRecord.note,
+        showOnTimeline: true,
+      },
+    ]);
   };
 
   const handleConfirmOffsets = (id: string) => {
+    if (!canEditOffsets) return;
     const pend = pendingOffsets[id];
     if (!pend) return;
     setCardDragging(null);
@@ -1395,12 +1428,13 @@ function App() {
   }, []);
 
   const handleStartLinking = useCallback(() => {
+    if (!canLinkSeries) return;
     const sourceId = overlayPhotoId;
     setOverlayPhotoId(null);
     setOverlayEditMode(false);
     setLinkingMode(true);
     setLinkingSourcePhotoId(sourceId);
-  }, [overlayPhotoId]);
+  }, [canLinkSeries, overlayPhotoId]);
 
   const handleCancelLink = useCallback(() => {
     setLinkingMode(false);
@@ -1419,6 +1453,7 @@ function App() {
 
   const handleConfirmLink = useCallback(
     async (targetPhotoId: string, chosenSeriesId: string | null) => {
+      if (!canLinkSeries) return;
       const sourceId = linkingSourcePhotoId;
       if (!sourceId) return;
       const sourcePhoto = personalPhotos.find((p) => p.id === sourceId);
@@ -1459,9 +1494,26 @@ function App() {
         return;
       }
 
-      await loadPhotosFromDb();
+      await refreshSeriesUiState();
     },
-    [linkingSourcePhotoId, personalPhotos, loadPhotosFromDb]
+    [canLinkSeries, linkingSourcePhotoId, personalPhotos, refreshSeriesUiState]
+  );
+
+  const handleUnlinkFromSeries = useCallback(
+    async (photoId: string) => {
+      if (!canUnlinkSeries) return;
+      if (!window.confirm("Убрать фото из серии?")) return;
+
+      try {
+        await updatePhotoSeriesId(photoId, undefined);
+        setOverlayEditMode(false);
+        await refreshSeriesUiState();
+      } catch (err) {
+        console.error("[unlink] DB update failed", err);
+        alert("Ошибка сохранения. Попробуйте ещё раз.");
+      }
+    },
+    [canUnlinkSeries, refreshSeriesUiState]
   );
 
   const handleOverlaySave = useCallback(
@@ -1469,6 +1521,7 @@ function App() {
       id: string,
       data: { date: string; title: string; note: string }
     ) => {
+      if (!canEditMetadata) return;
       updatePhotoMetadata(id, data).then(() => {
         setPersonalPhotos((prev) =>
           prev.map((p) =>
@@ -1480,11 +1533,12 @@ function App() {
         setOverlayEditMode(false);
       });
     },
-    []
+    [canEditMetadata]
   );
 
   const handleReplaceImage = useCallback(
     (id: string, file: File) => {
+      if (!canReplacePhoto) return;
       generatePreviewBlob(file)
         .then((previewBlob) => {
           return updatePhotoImage(id, file, previewBlob).then(() => {
@@ -1517,154 +1571,178 @@ function App() {
           });
         });
     },
-    [overlayPhotoId]
+    [canReplacePhoto, overlayPhotoId]
   );
 
   const handleAddPhotoToDay = useCallback(
-    (file: File) => {
+    async (file: File) => {
+      if (!canAddPhotoToDay) return;
       const current = personalPhotos.find((p) => p.id === overlayPhotoId);
       if (!current) return;
       const safeDate =
         current.date > todayStr() ? todayStr() : current.date;
       const id = `photo-${Date.now()}`;
       imageBlobsRef.current.set(id, file);
-      generatePreviewBlob(file)
-        .then((previewBlob) => {
-          return getAllPhotos().then((all) => {
-            const newRecord: PhotoRecord = {
-              id,
-              title: "Фото",
-              date: safeDate,
-              type: "personal",
-              imageBlob: file,
-              previewBlob,
-              offsetY: 0,
-              offsetXDays: 0,
-              showOnTimeline: false,
-            };
-            const withLanes = assignPersonalLaneIndex([
-              ...all,
-              { ...newRecord, showOnTimeline: true },
-            ]);
-            const assigned = withLanes.find((r) => r.id === id);
-            newRecord.laneIndex = assigned?.laneIndex ?? 0;
-            return savePhoto(newRecord).then(() => {
-              const image = URL.createObjectURL(previewBlob);
-              objectUrlsRef.current.set(id, image);
-              setPersonalPhotos((prev) => [
-                ...prev,
-                {
-                  id,
-                  title: newRecord.title,
-                  date: newRecord.date,
-                  image,
-                  offsetXDays: 0,
-                  offsetY: 0,
-                  laneIndex: newRecord.laneIndex,
-                  note: newRecord.note,
-                  showOnTimeline: false,
-                },
-              ]);
-              setOverlayPhotoId(id);
-              setOverlayUrl(image);
-            });
-          });
+      let previewBlob: Blob | undefined;
+      try {
+        previewBlob = await generatePreviewBlob(file);
+      } catch {
+        previewBlob = undefined;
+      }
+
+      const existingRecordsForLaneAssignment: PhotoRecord[] = personalPhotos.map(
+        (photo) => ({
+          id: photo.id,
+          title: photo.title,
+          date: photo.date,
+          type: "personal",
+          imageBlob: new Blob(),
+          offsetY: photo.offsetY,
+          offsetXDays: photo.offsetXDays,
+          laneIndex: photo.laneIndex,
+          note: photo.note,
+          showOnTimeline: photo.showOnTimeline,
+          seriesId: photo.seriesId,
         })
-        .catch(() => {
-          getAllPhotos().then((all) => {
-            const newRecord: PhotoRecord = {
-              id,
-              title: "Фото",
-              date: safeDate,
-              type: "personal",
-              imageBlob: file,
-              offsetY: 0,
-              offsetXDays: 0,
-              showOnTimeline: false,
-            };
-            const withLanes = assignPersonalLaneIndex([
-              ...all,
-              { ...newRecord, showOnTimeline: true },
-            ]);
-            const assigned = withLanes.find((r) => r.id === id);
-            newRecord.laneIndex = assigned?.laneIndex ?? 0;
-            savePhoto(newRecord).then(() => {
-              const image = URL.createObjectURL(file);
-              objectUrlsRef.current.set(id, image);
-              setPersonalPhotos((prev) => [
-                ...prev,
-                {
-                  id,
-                  title: newRecord.title,
-                  date: newRecord.date,
-                  image,
-                  offsetXDays: 0,
-                  offsetY: 0,
-                  laneIndex: newRecord.laneIndex,
-                  note: newRecord.note,
-                  showOnTimeline: false,
-                },
-              ]);
-              setOverlayPhotoId(id);
-              setOverlayUrl(image);
-            });
-          });
-        });
+      );
+      const newRecord: PhotoRecord = {
+        id,
+        title: "Фото",
+        date: safeDate,
+        type: "personal",
+        imageBlob: file,
+        previewBlob,
+        offsetY: 0,
+        offsetXDays: 0,
+        showOnTimeline: false,
+      };
+      const withLanes = assignPersonalLaneIndex([
+        ...existingRecordsForLaneAssignment,
+        { ...newRecord, showOnTimeline: true },
+      ]);
+      const assigned = withLanes.find((r) => r.id === id);
+      newRecord.laneIndex = assigned?.laneIndex ?? 0;
+
+      try {
+        await savePhoto(newRecord);
+      } catch (err) {
+        imageBlobsRef.current.delete(id);
+        console.error("[add-to-day] save failed", err);
+        alert("Ошибка сохранения фото. Попробуйте ещё раз.");
+        return;
+      }
+
+      const image = URL.createObjectURL(previewBlob ?? file);
+      objectUrlsRef.current.set(id, image);
+      setPersonalPhotos((prev) => [
+        ...prev,
+        {
+          id,
+          title: newRecord.title,
+          date: newRecord.date,
+          image,
+          offsetXDays: 0,
+          offsetY: 0,
+          laneIndex: newRecord.laneIndex,
+          note: newRecord.note,
+          showOnTimeline: false,
+        },
+      ]);
+      setOverlayPhotoId(id);
+      setOverlayUrl(image);
     },
-    [overlayPhotoId, personalPhotos]
+    [canAddPhotoToDay, overlayPhotoId, personalPhotos]
   );
 
-  const handleDeletePhoto = (id: string) => {
-    if (!window.confirm("Удалить фото? Это действие нельзя отменить.")) return;
-    setCardDragging(null);
-    const url = objectUrlsRef.current.get(id);
-    if (url) {
-      URL.revokeObjectURL(url);
-      objectUrlsRef.current.delete(id);
-    }
-    imageBlobsRef.current.delete(id);
-    if (overlayPhotoId === id) setOverlayPhotoId(null);
-    setPendingOffsets((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    deletePhoto(id).then(() => {
-      setPersonalPhotos((prev) => prev.filter((p) => p.id !== id));
-    });
-  };
+  const handleDeletePhoto = useCallback(
+    async (id: string) => {
+      if (!canDeletePhoto) return false;
+      if (!window.confirm("Удалить фото? Это действие нельзя отменить.")) return false;
 
-  const handleDeleteAllPhotosInDay = useCallback(() => {
-    if (!overlayPhotoId) return;
+      try {
+        await deletePhoto(id);
+      } catch (err) {
+        console.error("[delete] failed", err);
+        alert("Ошибка удаления фото. Попробуйте ещё раз.");
+        return false;
+      }
+
+      setCardDragging(null);
+      setHoveredPhotoId(null);
+      setHoveredSeriesId(null);
+      setOverlayEditMode(false);
+      const url = objectUrlsRef.current.get(id);
+      if (url) {
+        URL.revokeObjectURL(url);
+        objectUrlsRef.current.delete(id);
+      }
+      imageBlobsRef.current.delete(id);
+      if (overlayPhotoId === id) {
+        setOverlayPhotoId(null);
+        setOverlayUrl(null);
+      }
+      setPendingOffsets((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setPersonalPhotos((prev) => prev.filter((p) => p.id !== id));
+      return true;
+    },
+    [canDeletePhoto, overlayPhotoId]
+  );
+
+  const handleDeleteAllPhotosInDay = useCallback(async (): Promise<boolean> => {
+    if (!canDeleteAllPhotosInDay) return false;
+    if (!overlayPhotoId) return false;
     const current = personalPhotos.find((p) => p.id === overlayPhotoId);
-    if (!current) return;
-    const toDelete = personalPhotos.filter((p) => p.date === current.date);
-    if (toDelete.length === 0) return;
+    if (!current) return false;
+    const targetDate = current.date;
+    const toDelete = personalPhotos.filter((p) => p.date === targetDate);
+    if (toDelete.length === 0) return false;
     const msg =
       toDelete.length === 1
         ? "Удалить фото? Это действие нельзя отменить."
         : `Удалить все ${toDelete.length} фото этого дня? Это действие нельзя отменить.`;
-    if (!window.confirm(msg)) return;
-    setCardDragging(null);
-    setOverlayPhotoId(null);
-    toDelete.forEach((p) => {
-      const url = objectUrlsRef.current.get(p.id);
-      if (url) {
-        URL.revokeObjectURL(url);
-        objectUrlsRef.current.delete(p.id);
-      }
-      imageBlobsRef.current.delete(p.id);
-    });
-    setPendingOffsets((prev) => {
-      const next = { ...prev };
-      toDelete.forEach((p) => delete next[p.id]);
-      return next;
-    });
-    Promise.all(toDelete.map((p) => deletePhoto(p.id))).then(() => {
-      const ids = new Set(toDelete.map((p) => p.id));
+    if (!window.confirm(msg)) return false;
+
+    const cleanupDeletedPhotos = (deletedIds: string[]) => {
+      const ids = new Set(deletedIds);
+      setCardDragging(null);
+      setHoveredPhotoId(null);
+      setHoveredSeriesId(null);
+      setOverlayEditMode(false);
+      setOverlayPhotoId(null);
+      setOverlayUrl(null);
+      toDelete
+        .filter((p) => ids.has(p.id))
+        .forEach((p) => {
+          const url = objectUrlsRef.current.get(p.id);
+          if (url) {
+            URL.revokeObjectURL(url);
+            objectUrlsRef.current.delete(p.id);
+          }
+          imageBlobsRef.current.delete(p.id);
+        });
+      setPendingOffsets((prev) => {
+        const next = { ...prev };
+        deletedIds.forEach((id) => delete next[id]);
+        return next;
+      });
       setPersonalPhotos((prev) => prev.filter((p) => !ids.has(p.id)));
-    });
-  }, [overlayPhotoId, personalPhotos]);
+    };
+    try {
+      const deletedIds = await deletePhotosInDay(targetDate);
+      const idsToCleanup =
+        deletedIds.length > 0 ? deletedIds : toDelete.map((photo) => photo.id);
+      cleanupDeletedPhotos(idsToCleanup);
+      return idsToCleanup.length > 0;
+    } catch (err) {
+      console.error("[delete-day] failed", err);
+      alert("Ошибка удаления фото за день. Попробуйте ещё раз.");
+      return false;
+    }
+  }, [canDeleteAllPhotosInDay, overlayPhotoId, personalPhotos]);
 
   const onWheel: React.WheelEventHandler<HTMLDivElement> = (e) => {
     if (overlayPhotoId || modalOpen || linkingMode) {
@@ -1699,6 +1777,7 @@ function App() {
     }
     const photoCard = target.closest(".event-personal.event-photo");
     if (e.altKey && photoCard) {
+      if (!canEditOffsets) return;
       const id = photoCard.getAttribute("data-event-id");
       if (id) {
         e.preventDefault();
@@ -1830,23 +1909,43 @@ function App() {
           <button
             type="button"
             className="top-bar-btn"
-            onClick={() => setDataBackupModalOpen(true)}
-            title="Сохранить подписи и фото в файлы на диск"
+            onClick={() => {
+              if (canImportBackup) setDataBackupModalOpen(true);
+            }}
+            title={
+              !canImportBackup
+                ? PERSONAL_SERVER_DISABLED_WRITES_MESSAGE
+                : "Сохранить подписи и фото в файлы на диск"
+            }
+            disabled={!canImportBackup}
           >
             Резервная копия…
           </button>
           <button
             type="button"
             className="top-bar-btn"
-            onClick={() => setModalOpen(true)}
+            onClick={() => {
+              if (canAddPhoto) setModalOpen(true);
+            }}
+            title={
+              !canAddPhoto
+                ? PERSONAL_SERVER_DISABLED_WRITES_MESSAGE
+                : undefined
+            }
+            disabled={!canAddPhoto}
           >
             + Добавить фото
           </button>
+          {hasRestrictedPersonalWrites && (
+            <div className="top-bar-note">
+              {PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
+            </div>
+          )}
           <div className="scale">Масштаб: {scaleMeta[scale].label}</div>
         </div>
       </header>
 
-      {modalOpen && (
+      {modalOpen && canAddPhoto && (
         <AddPhotoModal
           onClose={() => setModalOpen(false)}
           onSubmit={handleAddPhoto}
@@ -1877,6 +1976,8 @@ function App() {
         <DataBackupModal
           onClose={() => setDataBackupModalOpen(false)}
           onImportDone={handleBackupImportDone}
+          isReadOnly={!canImportBackup}
+          readOnlyMessage={PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
         />
       )}
 
@@ -1886,7 +1987,13 @@ function App() {
             (() => {
               const p = personalPhotos.find((x) => x.id === overlayPhotoId);
               return p
-                ? { id: p.id, title: p.title, date: p.date, note: p.note }
+                ? {
+                    id: p.id,
+                    title: p.title,
+                    date: p.date,
+                    note: p.note,
+                    seriesId: p.seriesId,
+                  }
                 : null;
             })()
           }
@@ -1916,6 +2023,7 @@ function App() {
           seriesTitle={seriesTitle}
           onStartLinking={handleStartLinking}
           onConfirmLink={handleConfirmLink}
+          onUnlinkFromSeries={handleUnlinkFromSeries}
           onCancelLink={handleCancelLink}
           onCloseLinkPrompt={() => setOverlayPhotoId(null)}
           existingSeries={Object.entries(seriesMap).map(([id, title]) => ({
@@ -1924,6 +2032,16 @@ function App() {
           }))}
           onDeletePhoto={handleDeletePhoto}
           onDeleteAllPhotosInDay={handleDeleteAllPhotosInDay}
+          disableNonMetadataActions={
+            !canReplacePhoto || !canAddPhotoToDay || !canDeletePhoto || !canDeleteAllPhotosInDay
+          }
+          allowReplacePhoto={canReplacePhoto}
+          allowDeletePhoto={canDeletePhoto}
+          allowAddPhotoToDay={canAddPhotoToDay}
+          allowDeleteAllPhotosInDay={canDeleteAllPhotosInDay}
+          allowSeriesLinking={canLinkSeries}
+          allowSeriesUnlinking={canUnlinkSeries}
+          disabledActionsMessage={PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
         />
       )}
 
