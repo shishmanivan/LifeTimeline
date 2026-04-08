@@ -16,7 +16,8 @@
     "history:pics:tech": "tsx tools/fetchHistoryPicsTech.ts",
     "history:pics:culture:chunk": "tsx tools/fetchHistoryPicsCultureChunk.ts",
     "history:pics:clean": "tsx tools/cleanHistoryPicsDuplicates.ts",
-    "history:pics:svg": "tsx tools/fetchHistoryPicsSvg.ts"
+    "history:pics:svg": "tsx tools/fetchHistoryPicsSvg.ts",
+    "history:pics:repair-ext": "tsx tools/repairHistoryPicsExtensions.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

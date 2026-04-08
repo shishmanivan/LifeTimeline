@@ -10,6 +10,11 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  fetchImageAsset,
+  findBestExistingFileByDate,
+  getExtensionFromUrl,
+} from "./historyPicFileUtils";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -77,24 +82,10 @@ function eventKey(date: string, url: string): string {
   return `${date}|${normalizeUrl(url)}`;
 }
 
-function getExtensionFromUrl(url: string): string {
-  try {
-    const pathname = new URL(url).pathname.toLowerCase();
-    if (pathname.endsWith(".webp")) return ".webp";
-    if (pathname.endsWith(".jfif")) return ".jfif";
-    if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return ".jpg";
-    if (pathname.endsWith(".png")) return ".png";
-    if (pathname.endsWith(".svg")) return ".svg";
-  } catch {
-    /* ignore */
-  }
-  return ".webp";
-}
-
-function filenameForDate(date: string, ext = ".webp"): string {
-  const name = `${date}${ext}`;
+function filenameForDate(date: string, _ext = ".jpg"): string {
+  const name = `${date}.jpg`;
   if (/_[234]\b/.test(name)) throw new Error(`BUG: filename must not contain _2/_3/_4: ${name}`);
-  return name;
+  return `${date}.jpg`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -142,9 +133,7 @@ async function downloadWithRetry(imageUrl: string, destPath: string): Promise<vo
   let lastErr: Error | null = null;
   for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
     try {
-      const res = await fetch(imageUrl, { mode: "cors" });
-      if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-      const buffer = Buffer.from(await res.arrayBuffer());
+      const { buffer } = await fetchImageAsset(imageUrl);
       fs.writeFileSync(destPath, buffer, { flag: "wx" });
       return;
     } catch (e) {
@@ -217,7 +206,7 @@ async function main(): Promise<void> {
       (f) => f !== "_manifest.json" && f.startsWith(`${row.date}.`)
     );
     if (hasFileByDate) {
-      const match = fs.readdirSync(PICS_DIR).find((f) => f.startsWith(`${row.date}.`));
+      const match = findBestExistingFileByDate(PICS_DIR, row.date);
       if (match) {
         manifest[key] = match;
         manifestChanged = true;
@@ -245,8 +234,7 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const ext = getExtensionFromUrl(thumbnailUrl);
-      const filename = filenameForDate(row.date, ext);
+      const filename = filenameForDate(row.date, ".jpg");
       const destPath = path.join(PICS_DIR, filename);
 
       if (fs.existsSync(destPath)) {
@@ -257,12 +245,20 @@ async function main(): Promise<void> {
       }
 
       if (REQUEST_DELAY_MS > 0) await sleep(REQUEST_DELAY_MS);
-      await downloadWithRetry(thumbnailUrl, destPath);
-      manifest[key] = filename;
+      const resolvedFilename = filenameForDate(row.date, ".jpg");
+      const resolvedDestPath = path.join(PICS_DIR, resolvedFilename);
+      if (fs.existsSync(resolvedDestPath)) {
+        manifest[key] = resolvedFilename;
+        manifestChanged = true;
+        hit++;
+        continue;
+      }
+      await downloadWithRetry(thumbnailUrl, resolvedDestPath);
+      manifest[key] = resolvedFilename;
       usedDates.add(row.date);
       manifestChanged = true;
       downloaded++;
-      console.log(`[culture-chunk] DOWNLOADED ${row.date} ${row.url.split("/wiki/")[1] ?? ""} -> ${filename}`);
+      console.log(`[culture-chunk] DOWNLOADED ${row.date} ${row.url.split("/wiki/")[1] ?? ""} -> ${resolvedFilename}`);
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       console.log(`[culture-chunk] FAIL ${key}: ${errMsg}`);

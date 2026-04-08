@@ -14,6 +14,11 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  fetchImageAsset,
+  findBestExistingFileByDate,
+  getExtensionFromUrl,
+} from "./historyPicFileUtils";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -100,33 +105,11 @@ function isHttpUrl(value: string): boolean {
   return t.startsWith("http://") || t.startsWith("https://");
 }
 
-function getExtensionFromUrl(url: string): string {
-  try {
-    const pathname = new URL(url).pathname.toLowerCase();
-    if (pathname.endsWith(".webp")) return ".webp";
-    if (pathname.endsWith(".jfif")) return ".jfif";
-    if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return ".jpg";
-    if (pathname.endsWith(".png")) return ".png";
-    if (pathname.endsWith(".svg")) return ".svg";
-  } catch {
-    /* ignore */
-  }
-  return ".webp";
-}
-
-function filenameForDate(date: string, ext = ".webp"): string {
+function filenameForDate(date: string, _ext = ".jpg"): string {
   if (!/^\d{4}-\d{2}-\d{2}(_\d+)?$/.test(date)) {
     throw new Error(`BUG: invalid date for filename: ${date}`);
   }
-  return `${date}${ext}`;
-}
-
-function findExistingFileByDate(date: string): string | undefined {
-  if (!fs.existsSync(PICS_DIR)) return undefined;
-  const files = fs
-    .readdirSync(PICS_DIR)
-    .filter((file) => file !== "_manifest.json" && file.startsWith(`${date}.`));
-  return files[0];
+  return `${date}.jpg`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -207,9 +190,7 @@ async function downloadAndSave(imageUrl: string, destPath: string): Promise<void
   if (fs.existsSync(destPath)) {
     throw new Error(`File exists, refusing to overwrite: ${destPath}`);
   }
-  const res = await fetch(imageUrl, { mode: "cors" });
-  if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${imageUrl}`);
-  const buffer = Buffer.from(await res.arrayBuffer());
+  const { buffer } = await fetchImageAsset(imageUrl);
   fs.writeFileSync(destPath, buffer, { flag: "wx" });
 }
 
@@ -385,7 +366,7 @@ async function main(): Promise<void> {
       stats.hit++;
       continue;
     }
-    const existingByDate = findExistingFileByDate(row.date);
+    const existingByDate = findBestExistingFileByDate(PICS_DIR, row.date);
     if (existingByDate) {
       manifest[key] = existingByDate;
       manifestChanged = true;
@@ -425,7 +406,7 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const ext = getExtensionFromUrl(imageUrl);
+      const ext = ".jpg";
       const filename = filenameForDate(row.date, ext);
       const destPath = path.join(PICS_DIR, filename);
 
@@ -492,10 +473,9 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const filename = filenameForDate(row.date);
-    const destPath = path.join(PICS_DIR, filename);
-    if (fs.existsSync(destPath)) {
-      manifest[key] = filename;
+    const existingByDateAfterFetch = findBestExistingFileByDate(PICS_DIR, row.date);
+    if (existingByDateAfterFetch) {
+      manifest[key] = existingByDateAfterFetch;
       usedDates.add(row.date);
       manifestChanged = true;
       stats.hit++;
@@ -504,6 +484,15 @@ async function main(): Promise<void> {
 
     try {
       if (REQUEST_DELAY_MS > 0) await sleep(REQUEST_DELAY_MS);
+      const filename = filenameForDate(row.date, ".jpg");
+      const destPath = path.join(PICS_DIR, filename);
+      if (fs.existsSync(destPath)) {
+        manifest[key] = filename;
+        usedDates.add(row.date);
+        manifestChanged = true;
+        stats.hit++;
+        continue;
+      }
       await downloadWithRetry(thumbnailUrl, destPath);
       manifest[key] = filename;
       usedDates.add(row.date);

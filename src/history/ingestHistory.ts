@@ -9,13 +9,13 @@ import type { HistoricalEvent } from "./types";
 /** YYYY-MM-DD or YYYY-MM-DD_2, _3, _4 for same-day events */
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}(_\d+)?$/;
 
-async function sha1(str: string): Promise<string> {
-  const enc = new TextEncoder();
-  const data = enc.encode(str);
-  const hash = await crypto.subtle.digest("SHA-1", data);
-  return Array.from(new Uint8Array(hash))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+function sha1(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const chr = str.charCodeAt(i);
+    hash = ((hash << 5) - hash + chr) | 0;
+  }
+  return String(Math.abs(hash));
 }
 
 export type ParsedRow = {
@@ -159,6 +159,9 @@ async function runHistoryIngestInternal(): Promise<void> {
     import: "default",
   });
 
+console.log("[history] module keys", Object.keys(modules));
+console.log("[history] modules count", Object.keys(modules).length);
+
   let totalEvents = 0;
   let totalErrors = 0;
   const allFromDb = await getAllHistoricalEvents();
@@ -264,6 +267,7 @@ async function runHistoryIngestInternal(): Promise<void> {
 
   // Assign lanes once for ALL events and persist — never recalculate at display time
   const allEvents = await getAllHistoricalEvents();
+console.log("[history] total in db after ingest", allEvents.length);
   if (allEvents.length > 0) {
     const withLanes = assignHistoricalLanes(allEvents);
     await bulkUpsertHistoricalEvents(withLanes);
