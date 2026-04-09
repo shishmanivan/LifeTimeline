@@ -1,5 +1,6 @@
 import path from "node:path";
 import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { MVP_BACKEND_OWNER_DEFAULT_PROFILE_ID } from "./mvpOwnerContext";
 import type {
   ListServerPersonalPhotosResponse,
   ListServerSeriesResponse,
@@ -16,6 +17,7 @@ type PreparedPhotoEntry = {
   title: string;
   date: string;
   type: "personal";
+  profileId: string;
   note?: string;
   offsetY?: number;
   offsetXDays?: number;
@@ -28,8 +30,10 @@ type PreparedPhotoEntry = {
 
 export type PreparedPhotoUpsertMetadata = Omit<
   PreparedPhotoEntry,
-  "imageFile" | "previewFile"
->;
+  "imageFile" | "previewFile" | "profileId"
+> & {
+  profileId?: string;
+};
 
 export type PreparedUploadedAsset = {
   bytes: Uint8Array;
@@ -81,6 +85,7 @@ export const DEFAULT_PERSONAL_DATA_DIR = path.resolve(
 );
 
 const MANIFEST_FILENAME = "manifest.json";
+const DEFAULT_PROFILE_ID = MVP_BACKEND_OWNER_DEFAULT_PROFILE_ID;
 const MIME_TYPE_EXTENSIONS: Record<string, string> = {
   "image/jpeg": ".jpg",
   "image/png": ".png",
@@ -148,6 +153,7 @@ function toPhotoDto(
     title: photo.title,
     date: photo.date,
     type: "personal",
+    profileId: photo.profileId,
     note: photo.note,
     offsetY: photo.offsetY,
     offsetXDays: photo.offsetXDays,
@@ -161,10 +167,20 @@ function toPhotoDto(
   };
 }
 
+function normalizePreparedPhotoEntry(
+  photo: PreparedPhotoEntry | (Omit<PreparedPhotoEntry, "profileId"> & { profileId?: string })
+): PreparedPhotoEntry {
+  return {
+    ...photo,
+    profileId: photo.profileId ?? DEFAULT_PROFILE_ID,
+  };
+}
+
 function getManifestPath(dataDir: string): string {
   return path.join(dataDir, MANIFEST_FILENAME);
 }
 
+/** Base directory only; HTTP server should prefer `resolvePreparedPersonalDataDir` in `personalDatasetResolver`. */
 export function resolvePersonalDataDir(dir = process.env.PERSONAL_PHOTO_DATA_DIR): string {
   return dir ? path.resolve(dir) : DEFAULT_PERSONAL_DATA_DIR;
 }
@@ -190,7 +206,10 @@ async function readPreparedManifest(dataDir: string): Promise<PreparedManifest> 
     );
   }
 
-  return manifest;
+  return {
+    ...manifest,
+    photos: manifest.photos.map((photo) => normalizePreparedPhotoEntry(photo)),
+  };
 }
 
 async function writePreparedManifest(
@@ -339,6 +358,7 @@ export async function savePreparedPhoto(
 
   const nextEntry: PreparedPhotoEntry = {
     ...input.metadata,
+    profileId: input.metadata.profileId ?? DEFAULT_PROFILE_ID,
     imageFile,
     ...(previewFile ? { previewFile } : {}),
   };

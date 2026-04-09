@@ -5,8 +5,20 @@ import {
 import {
   personalPhotoStorage,
   personalPhotoCapabilities,
+  personalPhotoStorageIsServerMode,
 } from "./personalPhotoStorageSelector";
 import type { PhotoRecord } from "./personalPhotoStorage";
+import {
+  loadProfileForCurrentRoute,
+  type ServerProfileDto,
+} from "./serverPersonalPhotoStorage";
+import { getProfileRouteState } from "./profileRouteState";
+import {
+  computeIsOwnerViewingCurrentProfile,
+  getMvpOwnerCanonicalProfilePath,
+  getMvpSeededCurrentUser,
+  type MvpCurrentUser,
+} from "./mvpOwnerAuth";
 import type { HistoricalEvent } from "./history/types";
 import { runHistoryIngest } from "./history/ingestHistory";
 import { generatePreviewBlob } from "./imagePreview";
@@ -32,6 +44,8 @@ import {
 import { HistoricalEventModal } from "./HistoricalEventModal";
 import { PersonalPhotoModal } from "./PersonalPhotoModal";
 import { DataBackupModal } from "./DataBackupModal";
+import ppyMainLogoUrl from "../PPYMainLogo.png";
+import ivanPhotoUrl from "../IvanPhoto.JPG";
 
 export type { Offsets };
 
@@ -325,14 +339,6 @@ function App() {
     canUnlinkSeries,
     canWritePreview,
   } = personalPhotoCapabilities;
-  const hasRestrictedPersonalWrites =
-    !canAddPhoto ||
-    !canAddPhotoToDay ||
-    !canDeleteAllPhotosInDay ||
-    !canDeletePhoto ||
-    !canImportBackup ||
-    !canReplacePhoto ||
-    !canWritePreview;
   const persisted = useMemo(loadTimelineState, []);
 
   const [scaleIndex, setScaleIndex] = useState(() => {
@@ -340,6 +346,7 @@ function App() {
     if (typeof i === "number" && i >= 0 && i < scales.length) return i;
     return 2;
   });
+  const [activeProfile, setActiveProfile] = useState<ServerProfileDto | null>(null);
   const [personalPhotos, setPersonalPhotos] = useState<PersonalPhoto[]>([]);
   const [historicalEvents, setHistoricalEvents] = useState<HistoricalEvent[]>([]);
   const [layoutInfo, setLayoutInfo] = useState<{
@@ -430,6 +437,66 @@ function App() {
   const [liftedHistId, setLiftedHistId] = useState<string | null>(null);
   const hoverLiftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scale = scales[scaleIndex];
+  const currentPathname = useMemo(
+    () => (typeof window === "undefined" ? "/" : window.location.pathname),
+    []
+  );
+  const isLandingRoute = currentPathname === "/";
+  const currentUser = useMemo<MvpCurrentUser | null>(
+    () => getMvpSeededCurrentUser(),
+    []
+  );
+  const currentUserProfileId = currentUser?.profileId ?? null;
+  const {
+    routeProfileSlug,
+    isRootShortcut: isOwnerShortcutRoute,
+    isInvalidProfileRoute: isMissingProfileRoute,
+  } = useMemo(
+    () =>
+      getProfileRouteState(currentPathname, {
+        hasActiveProfile: activeProfile !== null,
+      }),
+    [activeProfile, currentPathname]
+  );
+  const isOwnerViewingCurrentProfile = computeIsOwnerViewingCurrentProfile(
+    currentUserProfileId,
+    isOwnerShortcutRoute && !isLandingRoute,
+    activeProfile
+  );
+  const canonicalProfilePath = useMemo(() => {
+    if (activeProfile) {
+      return `/${activeProfile.slug}`;
+    }
+    return getMvpOwnerCanonicalProfilePath();
+  }, [activeProfile]);
+  const canManageCurrentProfile = isOwnerViewingCurrentProfile;
+  const canAddPhotoForCurrentView = canAddPhoto && canManageCurrentProfile;
+  const canAddPhotoToDayForCurrentView =
+    canAddPhotoToDay && canManageCurrentProfile;
+  const canDeleteAllPhotosInDayForCurrentView =
+    canDeleteAllPhotosInDay && canManageCurrentProfile;
+  const canDeletePhotoForCurrentView =
+    canDeletePhoto && canManageCurrentProfile;
+  const canEditMetadataForCurrentView =
+    canEditMetadata && canManageCurrentProfile;
+  const canEditOffsetsForCurrentView =
+    canEditOffsets && canManageCurrentProfile;
+  const canImportBackupForCurrentView =
+    canImportBackup && canManageCurrentProfile;
+  const canLinkSeriesForCurrentView =
+    canLinkSeries && canManageCurrentProfile;
+  const canReplacePhotoForCurrentView =
+    canReplacePhoto && canManageCurrentProfile;
+  const canUnlinkSeriesForCurrentView =
+    canUnlinkSeries && canManageCurrentProfile;
+  const hasRestrictedPersonalWrites =
+    !canAddPhotoForCurrentView ||
+    !canAddPhotoToDayForCurrentView ||
+    !canDeleteAllPhotosInDayForCurrentView ||
+    !canDeletePhotoForCurrentView ||
+    !canImportBackupForCurrentView ||
+    !canReplacePhotoForCurrentView ||
+    !canWritePreview;
 
   const getActiveOffsets = (id: string): Offsets => {
     const pend = pendingOffsets[id];
@@ -532,6 +599,7 @@ function App() {
   }, [refreshSeriesUiState]);
 
   useEffect(() => {
+    if (isLandingRoute) return;
     let cancelled = false;
     loadPhotosFromDb().catch((err) => {
       if (!cancelled) console.error("[photos] load failed", err);
@@ -539,13 +607,49 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [loadPhotosFromDb]);
+  }, [isLandingRoute, loadPhotosFromDb]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    if (!personalPhotoStorageIsServerMode) {
+      setActiveProfile(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (isLandingRoute) {
+      setActiveProfile(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    loadProfileForCurrentRoute()
+      .then((profile) => {
+        if (!cancelled) {
+          setActiveProfile(profile);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setActiveProfile(null);
+          console.error("[profile] load failed", err);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLandingRoute]);
+
+  useEffect(() => {
+    if (isLandingRoute) return;
     loadSeriesMapFromStorage().catch((err) =>
       console.error("[series] load failed", err)
     );
-  }, [loadSeriesMapFromStorage]);
+  }, [isLandingRoute, loadSeriesMapFromStorage]);
 
   useEffect(() => {
     setCenterDate((prev) => clampCenterToToday(prev, scale));
@@ -1293,7 +1397,7 @@ function App() {
   };
 
   const handleAddPhoto = async (file: File, date: string, caption: string) => {
-    if (!canAddPhoto) return;
+    if (!canAddPhotoForCurrentView) return;
     const safeDate = date > todayStr() ? todayStr() : date;
     const id = `photo-${Date.now()}`;
     imageBlobsRef.current.set(id, file);
@@ -1324,6 +1428,7 @@ function App() {
       title: caption || "Фото",
       date: safeDate,
       type: "personal",
+      ...(activeProfile ? { profileId: activeProfile.id } : {}),
       imageBlob: file,
       previewBlob,
       offsetY: 0,
@@ -1365,7 +1470,7 @@ function App() {
   };
 
   const handleConfirmOffsets = (id: string) => {
-    if (!canEditOffsets) return;
+    if (!canEditOffsetsForCurrentView) return;
     const pend = pendingOffsets[id];
     if (!pend) return;
     setCardDragging(null);
@@ -1428,13 +1533,13 @@ function App() {
   }, []);
 
   const handleStartLinking = useCallback(() => {
-    if (!canLinkSeries) return;
+    if (!canLinkSeriesForCurrentView) return;
     const sourceId = overlayPhotoId;
     setOverlayPhotoId(null);
     setOverlayEditMode(false);
     setLinkingMode(true);
     setLinkingSourcePhotoId(sourceId);
-  }, [canLinkSeries, overlayPhotoId]);
+  }, [canLinkSeriesForCurrentView, overlayPhotoId]);
 
   const handleCancelLink = useCallback(() => {
     setLinkingMode(false);
@@ -1453,7 +1558,7 @@ function App() {
 
   const handleConfirmLink = useCallback(
     async (targetPhotoId: string, chosenSeriesId: string | null) => {
-      if (!canLinkSeries) return;
+      if (!canLinkSeriesForCurrentView) return;
       const sourceId = linkingSourcePhotoId;
       if (!sourceId) return;
       const sourcePhoto = personalPhotos.find((p) => p.id === sourceId);
@@ -1496,12 +1601,17 @@ function App() {
 
       await refreshSeriesUiState();
     },
-    [canLinkSeries, linkingSourcePhotoId, personalPhotos, refreshSeriesUiState]
+    [
+      canLinkSeriesForCurrentView,
+      linkingSourcePhotoId,
+      personalPhotos,
+      refreshSeriesUiState,
+    ]
   );
 
   const handleUnlinkFromSeries = useCallback(
     async (photoId: string) => {
-      if (!canUnlinkSeries) return;
+      if (!canUnlinkSeriesForCurrentView) return;
       if (!window.confirm("Убрать фото из серии?")) return;
 
       try {
@@ -1513,7 +1623,7 @@ function App() {
         alert("Ошибка сохранения. Попробуйте ещё раз.");
       }
     },
-    [canUnlinkSeries, refreshSeriesUiState]
+    [canUnlinkSeriesForCurrentView, refreshSeriesUiState]
   );
 
   const handleOverlaySave = useCallback(
@@ -1521,7 +1631,7 @@ function App() {
       id: string,
       data: { date: string; title: string; note: string }
     ) => {
-      if (!canEditMetadata) return;
+      if (!canEditMetadataForCurrentView) return;
       updatePhotoMetadata(id, data).then(() => {
         setPersonalPhotos((prev) =>
           prev.map((p) =>
@@ -1533,12 +1643,12 @@ function App() {
         setOverlayEditMode(false);
       });
     },
-    [canEditMetadata]
+    [canEditMetadataForCurrentView]
   );
 
   const handleReplaceImage = useCallback(
     (id: string, file: File) => {
-      if (!canReplacePhoto) return;
+      if (!canReplacePhotoForCurrentView) return;
       generatePreviewBlob(file)
         .then((previewBlob) => {
           return updatePhotoImage(id, file, previewBlob).then(() => {
@@ -1571,12 +1681,12 @@ function App() {
           });
         });
     },
-    [canReplacePhoto, overlayPhotoId]
+    [canReplacePhotoForCurrentView, overlayPhotoId]
   );
 
   const handleAddPhotoToDay = useCallback(
     async (file: File) => {
-      if (!canAddPhotoToDay) return;
+      if (!canAddPhotoToDayForCurrentView) return;
       const current = personalPhotos.find((p) => p.id === overlayPhotoId);
       if (!current) return;
       const safeDate =
@@ -1610,6 +1720,7 @@ function App() {
         title: "Фото",
         date: safeDate,
         type: "personal",
+        ...(activeProfile ? { profileId: activeProfile.id } : {}),
         imageBlob: file,
         previewBlob,
         offsetY: 0,
@@ -1651,12 +1762,17 @@ function App() {
       setOverlayPhotoId(id);
       setOverlayUrl(image);
     },
-    [canAddPhotoToDay, overlayPhotoId, personalPhotos]
+    [
+      activeProfile,
+      canAddPhotoToDayForCurrentView,
+      overlayPhotoId,
+      personalPhotos,
+    ]
   );
 
   const handleDeletePhoto = useCallback(
     async (id: string) => {
-      if (!canDeletePhoto) return false;
+      if (!canDeletePhotoForCurrentView) return false;
       if (!window.confirm("Удалить фото? Это действие нельзя отменить.")) return false;
 
       try {
@@ -1689,11 +1805,11 @@ function App() {
       setPersonalPhotos((prev) => prev.filter((p) => p.id !== id));
       return true;
     },
-    [canDeletePhoto, overlayPhotoId]
+    [canDeletePhotoForCurrentView, overlayPhotoId]
   );
 
   const handleDeleteAllPhotosInDay = useCallback(async (): Promise<boolean> => {
-    if (!canDeleteAllPhotosInDay) return false;
+    if (!canDeleteAllPhotosInDayForCurrentView) return false;
     if (!overlayPhotoId) return false;
     const current = personalPhotos.find((p) => p.id === overlayPhotoId);
     if (!current) return false;
@@ -1742,7 +1858,7 @@ function App() {
       alert("Ошибка удаления фото за день. Попробуйте ещё раз.");
       return false;
     }
-  }, [canDeleteAllPhotosInDay, overlayPhotoId, personalPhotos]);
+  }, [canDeleteAllPhotosInDayForCurrentView, overlayPhotoId, personalPhotos]);
 
   const onWheel: React.WheelEventHandler<HTMLDivElement> = (e) => {
     if (overlayPhotoId || modalOpen || linkingMode) {
@@ -1777,7 +1893,7 @@ function App() {
     }
     const photoCard = target.closest(".event-personal.event-photo");
     if (e.altKey && photoCard) {
-      if (!canEditOffsets) return;
+      if (!canEditOffsetsForCurrentView) return;
       const id = photoCard.getAttribute("data-event-id");
       if (id) {
         e.preventDefault();
@@ -1879,6 +1995,109 @@ function App() {
     };
   }, [cardDragging, scale]);
 
+  if (currentPathname === "/") {
+    /** Step 6 baseline 112px; Step 7 ~20% smaller → 112 × 0.8 ≈ 90. */
+    const landingAvatarPx = 90;
+    const landingPageBg = "#e6e6e6";
+    return (
+      <div
+        className="page"
+        style={{
+          padding: 0,
+          gap: 0,
+          background: landingPageBg,
+          color: "#111",
+        }}
+      >
+        <main
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: 0,
+            width: "100%",
+            padding: 0,
+            boxSizing: "border-box",
+            background: "transparent",
+          }}
+        >
+          <div
+            style={{
+              position: "relative",
+              width: "fit-content",
+              maxWidth: "min(88vw, 680px)",
+              margin: 0,
+              background: "transparent",
+            }}
+          >
+            <img
+              src={ppyMainLogoUrl}
+              alt="PastPresentYou"
+              style={{
+                display: "block",
+                width: "100%",
+                maxWidth: "680px",
+                height: "auto",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                right: "12%",
+                bottom: "2%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "0.5rem",
+                zIndex: 1,
+                maxWidth: "42%",
+                pointerEvents: "none",
+              }}
+            >
+              <a
+                href="/ivan"
+                className="landing-owner-photo-invite"
+                style={{
+                  display: "block",
+                  lineHeight: 0,
+                  borderRadius: "50%",
+                  pointerEvents: "auto",
+                }}
+              >
+                <img
+                  src={ivanPhotoUrl}
+                  alt="Открыть профиль"
+                  width={landingAvatarPx}
+                  height={landingAvatarPx}
+                  style={{
+                    width: "min(90px, 18vw)",
+                    height: "min(90px, 18vw)",
+                    borderRadius: "50%",
+                    objectFit: "cover",
+                    display: "block",
+                  }}
+                />
+              </a>
+              <p
+                style={{
+                  margin: 0,
+                  textAlign: "center",
+                  fontSize: "clamp(0.78rem, 2.4vw, 0.95rem)",
+                  lineHeight: 1.25,
+                  color: "#111",
+                }}
+              >
+                Посмотрите мой профиль
+              </p>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="page" onWheel={onWheel}>
       <header className="top-bar">
@@ -1910,14 +2129,14 @@ function App() {
             type="button"
             className="top-bar-btn"
             onClick={() => {
-              if (canImportBackup) setDataBackupModalOpen(true);
+              if (canImportBackupForCurrentView) setDataBackupModalOpen(true);
             }}
             title={
-              !canImportBackup
+              !canImportBackupForCurrentView
                 ? PERSONAL_SERVER_DISABLED_WRITES_MESSAGE
                 : "Сохранить подписи и фото в файлы на диск"
             }
-            disabled={!canImportBackup}
+            disabled={!canImportBackupForCurrentView}
           >
             Резервная копия…
           </button>
@@ -1925,17 +2144,37 @@ function App() {
             type="button"
             className="top-bar-btn"
             onClick={() => {
-              if (canAddPhoto) setModalOpen(true);
+              if (canAddPhotoForCurrentView) setModalOpen(true);
             }}
             title={
-              !canAddPhoto
+              !canAddPhotoForCurrentView
                 ? PERSONAL_SERVER_DISABLED_WRITES_MESSAGE
                 : undefined
             }
-            disabled={!canAddPhoto}
+            disabled={!canAddPhotoForCurrentView}
           >
             + Добавить фото
           </button>
+          {activeProfile && (
+            <div
+              className="top-bar-note"
+              title={`@${activeProfile.slug}`}
+            >
+              Профиль: {activeProfile.displayName || `@${activeProfile.slug}`}
+            </div>
+          )}
+          {isMissingProfileRoute && (
+            <div className="top-bar-note">
+              Профиль не найден: @{routeProfileSlug}
+            </div>
+          )}
+          {isOwnerShortcutRoute &&
+            !isMissingProfileRoute &&
+            canonicalProfilePath && (
+            <div className="top-bar-note">
+              Канонический профиль: `{canonicalProfilePath}`
+            </div>
+          )}
           {hasRestrictedPersonalWrites && (
             <div className="top-bar-note">
               {PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
@@ -1945,7 +2184,7 @@ function App() {
         </div>
       </header>
 
-      {modalOpen && canAddPhoto && (
+      {modalOpen && canAddPhotoForCurrentView && (
         <AddPhotoModal
           onClose={() => setModalOpen(false)}
           onSubmit={handleAddPhoto}
@@ -1976,7 +2215,7 @@ function App() {
         <DataBackupModal
           onClose={() => setDataBackupModalOpen(false)}
           onImportDone={handleBackupImportDone}
-          isReadOnly={!canImportBackup}
+          isReadOnly={!canImportBackupForCurrentView}
           readOnlyMessage={PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
         />
       )}
@@ -2009,7 +2248,11 @@ function App() {
           isLinkingMode={linkingMode}
           linkingSourcePhotoId={linkingSourcePhotoId}
           onClose={handleOverlayClose}
-          onEdit={() => setOverlayEditMode(true)}
+          onEdit={() => {
+            if (canEditMetadataForCurrentView) {
+              setOverlayEditMode(true);
+            }
+          }}
           onSave={handleOverlaySave}
           onReplaceImage={handleReplaceImage}
           onAddPhotoToDay={handleAddPhotoToDay}
@@ -2033,14 +2276,18 @@ function App() {
           onDeletePhoto={handleDeletePhoto}
           onDeleteAllPhotosInDay={handleDeleteAllPhotosInDay}
           disableNonMetadataActions={
-            !canReplacePhoto || !canAddPhotoToDay || !canDeletePhoto || !canDeleteAllPhotosInDay
+            !canReplacePhotoForCurrentView ||
+            !canAddPhotoToDayForCurrentView ||
+            !canDeletePhotoForCurrentView ||
+            !canDeleteAllPhotosInDayForCurrentView
           }
-          allowReplacePhoto={canReplacePhoto}
-          allowDeletePhoto={canDeletePhoto}
-          allowAddPhotoToDay={canAddPhotoToDay}
-          allowDeleteAllPhotosInDay={canDeleteAllPhotosInDay}
-          allowSeriesLinking={canLinkSeries}
-          allowSeriesUnlinking={canUnlinkSeries}
+          allowMetadataEdit={canEditMetadataForCurrentView}
+          allowReplacePhoto={canReplacePhotoForCurrentView}
+          allowDeletePhoto={canDeletePhotoForCurrentView}
+          allowAddPhotoToDay={canAddPhotoToDayForCurrentView}
+          allowDeleteAllPhotosInDay={canDeleteAllPhotosInDayForCurrentView}
+          allowSeriesLinking={canLinkSeriesForCurrentView}
+          allowSeriesUnlinking={canUnlinkSeriesForCurrentView}
           disabledActionsMessage={PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
         />
       )}

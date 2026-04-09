@@ -17,6 +17,7 @@ export type PhotoRecord = {
   title: string;
   date: string;
   type: "personal";
+  profileId?: string;
   imageBlob: Blob;
   previewBlob?: Blob;
   offsetY?: number;
@@ -30,6 +31,19 @@ export type PhotoRecord = {
   /** Series this photo belongs to */
   seriesId?: string;
 };
+
+const DEFAULT_PROFILE_ID = "1";
+
+function normalizePhotoRecord<T extends PhotoRecord | null>(record: T): T {
+  if (!record || record.profileId) {
+    return record;
+  }
+
+  return {
+    ...record,
+    profileId: DEFAULT_PROFILE_ID,
+  } as T;
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -126,7 +140,7 @@ export async function savePhoto(photo: PhotoRecord): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    const request = store.put(photo);
+    const request = store.put(normalizePhotoRecord(photo));
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();
     tx.oncomplete = () => db.close();
@@ -140,7 +154,8 @@ export async function getAllPhotos(): Promise<PhotoRecord[]> {
     const store = tx.objectStore(STORE_NAME);
     const request = store.getAll();
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result || []);
+    request.onsuccess = () =>
+      resolve(((request.result || []) as PhotoRecord[]).map((photo) => normalizePhotoRecord(photo)));
     tx.oncomplete = () => db.close();
   });
 }
@@ -152,7 +167,8 @@ export async function getPhoto(id: string): Promise<PhotoRecord | null> {
     const store = tx.objectStore(STORE_NAME);
     const request = store.get(id);
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result ?? null);
+    request.onsuccess = () =>
+      resolve(normalizePhotoRecord((request.result as PhotoRecord | undefined) ?? null));
     tx.oncomplete = () => db.close();
   });
 }

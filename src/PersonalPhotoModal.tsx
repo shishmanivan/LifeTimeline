@@ -43,6 +43,7 @@ type PersonalPhotoModalProps = {
   onDeletePhoto: (id: string) => boolean | Promise<boolean>;
   onDeleteAllPhotosInDay: () => boolean | Promise<boolean>;
   disableNonMetadataActions?: boolean;
+  allowMetadataEdit?: boolean;
   allowReplacePhoto?: boolean;
   allowDeletePhoto?: boolean;
   allowAddPhotoToDay?: boolean;
@@ -87,6 +88,7 @@ export function PersonalPhotoModal({
   onDeletePhoto,
   onDeleteAllPhotosInDay,
   disableNonMetadataActions = false,
+  allowMetadataEdit = false,
   allowReplacePhoto = false,
   allowDeletePhoto = false,
   allowAddPhotoToDay = false,
@@ -579,6 +581,8 @@ export function PersonalPhotoModal({
                     type="button"
                     className="personal-modal-btn personal-modal-btn-primary"
                     onClick={handleSave}
+                    disabled={!allowMetadataEdit}
+                    title={!allowMetadataEdit ? disabledActionsMessage : undefined}
                   >
                     Сохранить
                   </button>
@@ -627,6 +631,8 @@ export function PersonalPhotoModal({
                     type="button"
                     className="personal-modal-btn-edit"
                     onClick={onEdit}
+                    disabled={!allowMetadataEdit}
+                    title={!allowMetadataEdit ? disabledActionsMessage : undefined}
                   >
                     Редактировать
                   </button>

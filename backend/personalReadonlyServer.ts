@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { Readable } from "node:stream";
+import { getProfileBySlug } from "./profiles";
 import {
   deletePreparedPhotosInDay,
   deletePreparedPhoto,
@@ -10,7 +11,6 @@ import {
   readPreparedPersonalDataset,
   replacePreparedPhotoImage,
   resolveAssetFilePath,
-  resolvePersonalDataDir,
   savePreparedPhoto,
   savePreparedSeries,
   type PreparedPhotoUpsertMetadata,
@@ -21,14 +21,24 @@ import {
   type PreparedSeriesPatch,
   type PersonalAssetKind,
 } from "./personalDataset";
+import {
+  resolvePreparedPersonalDataDir,
+  type PreparedPersonalDatasetScope,
+} from "./personalDatasetResolver";
+import { evaluatePersonalWriteOwnership } from "./personalWriteOwnershipGuard";
 
 type PersonalReadonlyServerConfig = {
   host: string;
   port: number;
-  dataDir: string;
   publicBaseUrl?: string;
   writeToken?: string;
 };
+
+function personalPreparedDatasetDir(
+  scope?: PreparedPersonalDatasetScope
+): string {
+  return resolvePreparedPersonalDataDir(scope);
+}
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
@@ -41,7 +51,6 @@ function getConfig(): PersonalReadonlyServerConfig {
   return {
     host: process.env.PERSONAL_PHOTO_SERVER_HOST || DEFAULT_HOST,
     port: Number.isFinite(parsedPort) ? parsedPort : DEFAULT_PORT,
-    dataDir: resolvePersonalDataDir(),
     publicBaseUrl: process.env.PERSONAL_PHOTO_PUBLIC_BASE_URL,
     writeToken: process.env.PERSONAL_PHOTO_WRITE_TOKEN?.trim() || undefined,
   };
@@ -49,7 +58,10 @@ function getConfig(): PersonalReadonlyServerConfig {
 
 function applyCors(res: ServerResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,PUT,PATCH,OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,PUT,PATCH,DELETE,OPTIONS"
+  );
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, X-Personal-Write-Token"
@@ -314,6 +326,7 @@ function parsePhotoUpsertMetadata(
     "title",
     "date",
     "type",
+    "profileId",
     "note",
     "offsetY",
     "offsetXDays",
@@ -354,6 +367,13 @@ function parsePhotoUpsertMetadata(
     date: body.date,
     type: "personal",
   };
+
+  if ("profileId" in body && typeof body.profileId !== "string") {
+    throw new Error('Field "profileId" must be a string.');
+  }
+  if (typeof body.profileId === "string" && body.profileId.trim()) {
+    metadata.profileId = body.profileId;
+  }
 
   if ("note" in body) {
     if (typeof body.note !== "string") {
@@ -555,7 +575,16 @@ async function handleRequest(
       return;
     }
 
-    const deletedPhotoIds = await deletePreparedPhotosInDay(config.dataDir, date);
+    const byDateOwnership = evaluatePersonalWriteOwnership({
+      operation: "delete-photos-by-date",
+      date,
+    });
+    if (!byDateOwnership.allowed) {
+      sendText(res, byDateOwnership.statusCode, byDateOwnership.message);
+      return;
+    }
+
+    const deletedPhotoIds = await deletePreparedPhotosInDay(personalPreparedDatasetDir(), date);
     sendJson(res, 200, { deletedPhotoIds });
     return;
   }
@@ -564,10 +593,19 @@ async function handleRequest(
   if (req.method === "PUT" && photoSaveMatch) {
     const photoId = decodeURIComponent(photoSaveMatch[1]);
     const payload = await parsePhotoSaveRequest(req, photoId);
-    await savePreparedPhoto(config.dataDir, payload);
+    const saveOwnership = evaluatePersonalWriteOwnership({
+      operation: "upsert-photo",
+      photoId,
+      profileId: payload.metadata.profileId,
+    });
+    if (!saveOwnership.allowed) {
+      sendText(res, saveOwnership.statusCode, saveOwnership.message);
+      return;
+    }
+    await savePreparedPhoto(personalPreparedDatasetDir(), payload);
 
     const dataset = await readPreparedPersonalDataset(
-      config.dataDir,
+      personalPreparedDatasetDir(),
       getPublicBaseUrl(req, config.publicBaseUrl)
     );
     const photo = dataset.photosResponse.photos.find((item) => item.id === photoId);
@@ -583,7 +621,15 @@ async function handleRequest(
   const photoDeleteMatch = pathname.match(/^\/api\/personal\/photos\/([^/]+)$/);
   if (req.method === "DELETE" && photoDeleteMatch) {
     const photoId = decodeURIComponent(photoDeleteMatch[1]);
-    const deleted = await deletePreparedPhoto(config.dataDir, photoId);
+    const deleteOwnership = evaluatePersonalWriteOwnership({
+      operation: "delete-photo",
+      photoId,
+    });
+    if (!deleteOwnership.allowed) {
+      sendText(res, deleteOwnership.statusCode, deleteOwnership.message);
+      return;
+    }
+    const deleted = await deletePreparedPhoto(personalPreparedDatasetDir(), photoId);
     if (!deleted) {
       sendText(res, 404, "Photo not found.");
       return;
@@ -597,14 +643,22 @@ async function handleRequest(
   if (req.method === "PUT" && photoImageMatch) {
     const photoId = decodeURIComponent(photoImageMatch[1]);
     const payload = await parsePhotoImageUpdateRequest(req);
-    const updated = await replacePreparedPhotoImage(config.dataDir, photoId, payload);
+    const imageOwnership = evaluatePersonalWriteOwnership({
+      operation: "replace-photo-image",
+      photoId,
+    });
+    if (!imageOwnership.allowed) {
+      sendText(res, imageOwnership.statusCode, imageOwnership.message);
+      return;
+    }
+    const updated = await replacePreparedPhotoImage(personalPreparedDatasetDir(), photoId, payload);
     if (!updated) {
       sendText(res, 404, "Photo not found.");
       return;
     }
 
     const dataset = await readPreparedPersonalDataset(
-      config.dataDir,
+      personalPreparedDatasetDir(),
       getPublicBaseUrl(req, config.publicBaseUrl)
     );
     const photo = dataset.photosResponse.photos.find((item) => item.id === photoId);
@@ -623,14 +677,22 @@ async function handleRequest(
   if (req.method === "PATCH" && metadataMatch) {
     const photoId = decodeURIComponent(metadataMatch[1]);
     const patch = parsePhotoMetadataPatch(await readJsonBody(req));
-    const updated = await updatePreparedPhotoMetadata(config.dataDir, photoId, patch);
+    const metadataOwnership = evaluatePersonalWriteOwnership({
+      operation: "patch-photo-metadata",
+      photoId,
+    });
+    if (!metadataOwnership.allowed) {
+      sendText(res, metadataOwnership.statusCode, metadataOwnership.message);
+      return;
+    }
+    const updated = await updatePreparedPhotoMetadata(personalPreparedDatasetDir(), photoId, patch);
     if (!updated) {
       sendText(res, 404, "Photo not found.");
       return;
     }
 
     const dataset = await readPreparedPersonalDataset(
-      config.dataDir,
+      personalPreparedDatasetDir(),
       getPublicBaseUrl(req, config.publicBaseUrl)
     );
     const photo = dataset.photosResponse.photos.find((item) => item.id === photoId);
@@ -649,7 +711,15 @@ async function handleRequest(
   if (req.method === "PATCH" && photoSeriesMatch) {
     const photoId = decodeURIComponent(photoSeriesMatch[1]);
     const patch = parsePhotoSeriesPatch(await readJsonBody(req));
-    const result = await updatePreparedPhotoSeries(config.dataDir, photoId, patch);
+    const photoSeriesOwnership = evaluatePersonalWriteOwnership({
+      operation: "patch-photo-series",
+      photoId,
+    });
+    if (!photoSeriesOwnership.allowed) {
+      sendText(res, photoSeriesOwnership.statusCode, photoSeriesOwnership.message);
+      return;
+    }
+    const result = await updatePreparedPhotoSeries(personalPreparedDatasetDir(), photoId, patch);
 
     if (result === "photo-not-found") {
       sendText(res, 404, "Photo not found.");
@@ -661,7 +731,7 @@ async function handleRequest(
     }
 
     const dataset = await readPreparedPersonalDataset(
-      config.dataDir,
+      personalPreparedDatasetDir(),
       getPublicBaseUrl(req, config.publicBaseUrl)
     );
     const photo = dataset.photosResponse.photos.find((item) => item.id === photoId);
@@ -678,10 +748,55 @@ async function handleRequest(
   if (req.method === "PUT" && seriesMatch) {
     const seriesId = decodeURIComponent(seriesMatch[1]);
     const series = parseSeriesRecord(await readJsonBody(req), seriesId);
-    await savePreparedSeries(config.dataDir, series);
+    const seriesOwnership = evaluatePersonalWriteOwnership({
+      operation: "upsert-series",
+      seriesId,
+    });
+    if (!seriesOwnership.allowed) {
+      sendText(res, seriesOwnership.statusCode, seriesOwnership.message);
+      return;
+    }
+    await savePreparedSeries(personalPreparedDatasetDir(), series);
     sendJson(res, 200, { series });
     return;
   }
+
+const profileMatch = pathname.match(/^\/api\/profile\/([^/]+)$/);
+if (req.method === "GET" && profileMatch) {
+  const slug = decodeURIComponent(profileMatch[1]);
+  const profile = getProfileBySlug(slug);
+
+  if (!profile) {
+    sendJson(res, 404, { error: "Profile not found" });
+    return;
+  }
+
+  sendJson(res, 200, profile);
+  return;
+}
+
+const profilePhotosMatch = pathname.match(/^\/api\/profile\/([^/]+)\/photos$/);
+if (req.method === "GET" && profilePhotosMatch) {
+  const slug = decodeURIComponent(profilePhotosMatch[1]);
+  const profile = getProfileBySlug(slug);
+
+  if (!profile) {
+    sendJson(res, 404, { error: "Profile not found" });
+    return;
+  }
+
+  const dataset = await readPreparedPersonalDataset(
+    personalPreparedDatasetDir({ profileId: profile.id }),
+    getPublicBaseUrl(req, config.publicBaseUrl)
+  );
+  const photos = dataset.photosResponse.photos.filter(
+    (photo) => photo.profileId === profile.id
+  );
+
+  sendJson(res, 200, { photos });
+  return;
+}
+
 
   if (req.method !== "GET") {
     sendText(res, 405, "Method not allowed.");
@@ -690,7 +805,7 @@ async function handleRequest(
 
   if (pathname === "/api/personal/photos") {
     const dataset = await readPreparedPersonalDataset(
-      config.dataDir,
+      personalPreparedDatasetDir(),
       getPublicBaseUrl(req, config.publicBaseUrl)
     );
     sendJson(res, 200, dataset.photosResponse);
@@ -699,7 +814,7 @@ async function handleRequest(
 
   if (pathname === "/api/personal/series") {
     const dataset = await readPreparedPersonalDataset(
-      config.dataDir,
+      personalPreparedDatasetDir(),
       getPublicBaseUrl(req, config.publicBaseUrl)
     );
     sendJson(res, 200, dataset.seriesResponse);
@@ -710,7 +825,7 @@ async function handleRequest(
   if (pathname.startsWith(imagePrefix)) {
     await serveAsset(
       res,
-      config.dataDir,
+      personalPreparedDatasetDir(),
       "images",
       pathname.slice(imagePrefix.length)
     );
@@ -721,7 +836,7 @@ async function handleRequest(
   if (pathname.startsWith(previewPrefix)) {
     await serveAsset(
       res,
-      config.dataDir,
+      personalPreparedDatasetDir(),
       "previews",
       pathname.slice(previewPrefix.length)
     );
@@ -733,7 +848,7 @@ async function handleRequest(
 
 async function main(): Promise<void> {
   const config = getConfig();
-  await ensurePreparedPersonalDataset(config.dataDir);
+  await ensurePreparedPersonalDataset(personalPreparedDatasetDir());
 
   const server = createServer((req, res) => {
     handleRequest(req, res, config).catch((error) => {
@@ -745,7 +860,7 @@ async function main(): Promise<void> {
   server.listen(config.port, config.host, () => {
     const publicBaseUrl =
       config.publicBaseUrl || `http://${config.host}:${config.port}`;
-    console.log(`[personal-backend] data dir: ${config.dataDir}`);
+    console.log(`[personal-backend] data dir: ${personalPreparedDatasetDir()}`);
     console.log(`[personal-backend] photos: ${publicBaseUrl}/api/personal/photos`);
     console.log(`[personal-backend] series: ${publicBaseUrl}/api/personal/series`);
     console.log(

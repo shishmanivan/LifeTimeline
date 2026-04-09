@@ -31,6 +31,7 @@ const REQUEST_DELAY_MS = 1200;
 const RATE_LIMIT_WAIT_MS = 90_000;
 
 type Manifest = Record<string, string>;
+type TargetScope = "main" | "all";
 
 /** Normalize URL for consistent manifest keys (avoids duplicates from %E2%80%93 vs –, trailing slash, etc.) */
 function normalizeUrl(url: string): string {
@@ -241,13 +242,15 @@ async function main(): Promise<void> {
     if (p) usedDates.add(p);
   }
 
-  function findTsvFiles(dir: string, base = ""): string[] {
+function findTsvFiles(dir: string, scope: TargetScope, base = ""): string[] {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     const out: string[] = [];
     for (const e of entries) {
       const rel = base ? `${base}/${e.name}` : e.name;
       if (e.isDirectory()) {
-        out.push(...findTsvFiles(path.join(dir, e.name), rel));
+      if (scope === "all") {
+        out.push(...findTsvFiles(path.join(dir, e.name), scope, rel));
+      }
       } else if (e.name.endsWith(".tsv") && e.name !== "Main.tsv") {
         out.push(rel);
       }
@@ -255,7 +258,7 @@ async function main(): Promise<void> {
     return out;
   }
 
-  const tsvFiles = findTsvFiles(SOURCES_DIR);
+  const tsvFiles = findTsvFiles(SOURCES_DIR, "main");
   const allRows: { date: string; url: string; image: string }[] = [];
 
   for (const file of tsvFiles) {
@@ -306,6 +309,15 @@ async function main(): Promise<void> {
       continue;
     }
 
+    const existingByDate = findBestExistingFileByDate(PICS_DIR, row.date);
+    if (existingByDate) {
+      manifest[key] = existingByDate;
+      usedDates.add(row.date);
+      manifestChanged = true;
+      stats.hit++;
+      continue;
+    }
+
     const hasManualImage = manualImage.length > 0;
     const hasRasterOnDisk = fs.readdirSync(PICS_DIR).some(
       (f) => f.startsWith(`${row.date}.`) && f !== "_manifest.json" && /\.(webp|jpg|jpeg|jfif|png)$/i.test(f)
@@ -326,15 +338,6 @@ async function main(): Promise<void> {
         imageUrl = await resolveImageUrl(manualImage);
       }
       if (imageUrl) {
-        const existingByDate = findBestExistingFileByDate(PICS_DIR, row.date);
-        if (existingByDate) {
-          manifest[key] = existingByDate;
-          usedDates.add(row.date);
-          manifestChanged = true;
-          stats.hit++;
-          continue;
-        }
-
         const ext = ".jpg";
         const filename = filenameForDate(row.date, ext);
         const destPath = path.join(PICS_DIR, filename);
@@ -398,15 +401,6 @@ async function main(): Promise<void> {
       console.log(`[historypics] SKIP_NO_WIKI_IMAGE ${key}`);
       stats.skippedNoWikiImage++;
       skippedNoWikiList.push({ key, url: row.url });
-      continue;
-    }
-
-    const existingByDate = findBestExistingFileByDate(PICS_DIR, row.date);
-    if (existingByDate) {
-      manifest[key] = existingByDate;
-      usedDates.add(row.date);
-      manifestChanged = true;
-      stats.hit++;
       continue;
     }
     try {

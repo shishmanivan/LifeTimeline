@@ -1,0 +1,13 @@
+# Example: serve the Vite production build (`dist/`) with SPA fallback.
+# Without `try_files … /index.html`, direct visits to `/ivan`, `/abc`, etc. return 404
+# from nginx because those paths are not files on disk.
+#
+# Merge with your existing `server { … }` block and keep the `/api/personal/` proxy
+# from `nginx-personal-photo-backend.conf.example`.
+#
+# Adjust `root` to wherever you upload `dist/` (contents: index.html + assets/).
+
+# location / {
+#     root /srv/pastpresentyou/app/dist;
+#     try_files $uri $uri/ /index.html;
+# }

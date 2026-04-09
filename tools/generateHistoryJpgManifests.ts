@@ -17,6 +17,7 @@ type ManifestTarget = {
   sourcesDir: string;
   picsDir: string;
   includeFile?: (fileName: string) => boolean;
+  recurse?: boolean;
 };
 
 const TARGETS: ManifestTarget[] = [
@@ -25,24 +26,28 @@ const TARGETS: ManifestTarget[] = [
     sourcesDir: path.join(HISTORY_DIR, "sources"),
     picsDir: path.join(HISTORY_DIR, "HistoryPics"),
     includeFile: (fileName) => fileName.endsWith(".tsv") && fileName !== "Main.tsv",
+    recurse: false,
   },
   {
     label: "culture",
     sourcesDir: path.join(HISTORY_DIR, "sources", "Culture"),
     picsDir: path.join(HISTORY_DIR, "HistoryPics", "Culture"),
     includeFile: (fileName) => fileName.endsWith(".tsv"),
+    recurse: true,
   },
   {
     label: "autos",
     sourcesDir: path.join(HISTORY_DIR, "sources", "Autos"),
     picsDir: path.join(HISTORY_DIR, "HistoryPics", "Autos"),
     includeFile: (fileName) => fileName.endsWith(".tsv") && !fileName.startsWith("_"),
+    recurse: true,
   },
   {
     label: "tech",
     sourcesDir: path.join(HISTORY_DIR, "sources", "Tech"),
     picsDir: path.join(HISTORY_DIR, "HistoryPics", "Tech"),
     includeFile: (fileName) => fileName.endsWith(".tsv"),
+    recurse: true,
   },
 ];
 
@@ -98,7 +103,12 @@ function parseTsv(raw: string): ParsedRow[] {
   return rows;
 }
 
-function collectFiles(dir: string, includeFile: (fileName: string) => boolean, base = ""): string[] {
+function collectFiles(
+  dir: string,
+  includeFile: (fileName: string) => boolean,
+  recurse = true,
+  base = ""
+): string[] {
   if (!fs.existsSync(dir)) return [];
 
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -106,7 +116,9 @@ function collectFiles(dir: string, includeFile: (fileName: string) => boolean, b
   for (const entry of entries) {
     const rel = base ? `${base}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      files.push(...collectFiles(path.join(dir, entry.name), includeFile, rel));
+      if (recurse) {
+        files.push(...collectFiles(path.join(dir, entry.name), includeFile, recurse, rel));
+      }
     } else if (includeFile(entry.name)) {
       files.push(rel);
     }
@@ -115,7 +127,11 @@ function collectFiles(dir: string, includeFile: (fileName: string) => boolean, b
 }
 
 function buildManifest(target: ManifestTarget): { manifest: Manifest; totalRows: number; mappedRows: number } {
-  const tsvFiles = collectFiles(target.sourcesDir, target.includeFile ?? ((fileName) => fileName.endsWith(".tsv")));
+  const tsvFiles = collectFiles(
+    target.sourcesDir,
+    target.includeFile ?? ((fileName) => fileName.endsWith(".tsv")),
+    target.recurse ?? true
+  );
   const allRows: ParsedRow[] = [];
 
   for (const file of tsvFiles) {

@@ -1328,3 +1328,38 @@ body {
     flex: 0 0 auto;
   }
 }
+
+/* Landing `/` — soft periodic wobble on owner avatar (photo link only) */
+@keyframes landing-avatar-invite {
+  0%,
+  82% {
+    transform: rotate(0deg);
+  }
+  84% {
+    transform: rotate(-2.2deg);
+  }
+  86.5% {
+    transform: rotate(2deg);
+  }
+  89% {
+    transform: rotate(-1.2deg);
+  }
+  91% {
+    transform: rotate(0.7deg);
+  }
+  93%,
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.landing-owner-photo-invite {
+  transform-origin: center center;
+  animation: landing-avatar-invite 6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-owner-photo-invite {
+    animation: none;
+  }
+}

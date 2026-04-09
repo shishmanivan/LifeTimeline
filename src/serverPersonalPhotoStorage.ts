@@ -5,6 +5,7 @@ import type {
   PhotoRecord,
   SeriesRecord,
 } from "./personalPhotoStorage";
+import { getRouteProfileSlug } from "./profileRouteState";
 
 type FetchLike = typeof fetch;
 const PERSONAL_WRITE_TOKEN_HEADER = "X-Personal-Write-Token";
@@ -35,6 +36,7 @@ type ServerPhotoFields = {
   title: string;
   date: string;
   type: "personal";
+  profileId?: string;
   note?: string;
   offsetY?: number;
   offsetXDays?: number;
@@ -49,11 +51,17 @@ type ServerPhotoFields = {
  * required by the current storage interface.
  */
 export type ServerPersonalPhotoDto = ServerPhotoFields & {
+  profileId: string;
   imageUrl: string;
   previewUrl?: string;
 };
 
 export type ServerSeriesDto = SeriesRecord;
+export type ServerProfileDto = {
+  id: string;
+  slug: string;
+  displayName: string;
+};
 
 export type ListServerPersonalPhotosResponse = {
   photos: ServerPersonalPhotoDto[];
@@ -99,6 +107,10 @@ export type UpdateServerPhotoSeriesRequest = {
 };
 
 const DEFAULT_API_BASE_PATH = "/api/personal";
+const DEFAULT_PROFILE_ID = "1";
+const ENV_API_BASE_URL =
+  (import.meta.env.VITE_PERSONAL_PHOTO_API_BASE_URL as string | undefined)?.trim() ||
+  undefined;
 
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
@@ -106,6 +118,19 @@ function trimTrailingSlash(value: string): string {
 
 function trimLeadingSlash(value: string): string {
   return value.replace(/^\/+/, "");
+}
+
+function getApiBaseUrl(baseUrl: string | undefined): string {
+  const resolved = baseUrl?.trim() || ENV_API_BASE_URL;
+  if (!resolved) {
+    throw new Error("VITE_PERSONAL_PHOTO_API_BASE_URL is required for server photo storage.");
+  }
+
+  return trimTrailingSlash(resolved);
+}
+
+function buildAbsoluteApiUrl(baseUrl: string | undefined, path: string): string {
+  return `${getApiBaseUrl(baseUrl)}/${trimLeadingSlash(path)}`;
 }
 
 function joinApiUrl(
@@ -117,8 +142,72 @@ function joinApiUrl(
     /\/{2,}/g,
     "/"
   );
-  if (!baseUrl) return joinedPath;
-  return `${trimTrailingSlash(baseUrl)}${joinedPath}`;
+  return buildAbsoluteApiUrl(baseUrl, joinedPath);
+}
+
+export async function loadProfileForCurrentRoute(
+  options: Pick<ServerPersonalPhotoStorageOptions, "baseUrl" | "fetchImpl"> = {}
+): Promise<ServerProfileDto | null> {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const profileSlug = getRouteProfileSlug(window.location.pathname);
+  if (!profileSlug) {
+    return null;
+  }
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const response = await fetchImpl(
+    joinApiUrl(options.baseUrl, "", `/api/profile/${encodeURIComponent(profileSlug)}`)
+  );
+  if (!response.ok) {
+    return null;
+  }
+
+  return (await response.json()) as ServerProfileDto;
+}
+
+function getPhotosListUrl(
+  baseUrl: string | undefined,
+  apiBasePath: string
+): string {
+  if (typeof window !== "undefined") {
+    const profileSlug = getRouteProfileSlug(window.location.pathname);
+    if (profileSlug) {
+      return joinApiUrl(baseUrl, "", `/api/profile/${encodeURIComponent(profileSlug)}/photos`);
+    }
+  }
+
+  return joinApiUrl(baseUrl, apiBasePath, "/photos");
+}
+
+async function fetchPhotosListResponse(
+  fetchImpl: FetchLike,
+  baseUrl: string | undefined,
+  apiBasePath: string
+): Promise<ListServerPersonalPhotosResponse> {
+  if (typeof window !== "undefined") {
+    const profileSlug = getRouteProfileSlug(window.location.pathname);
+    if (profileSlug) {
+      const profileResponse = await fetchImpl(
+        joinApiUrl(baseUrl, "", `/api/profile/${encodeURIComponent(profileSlug)}`)
+      );
+      if (!profileResponse.ok) {
+        return { photos: [] };
+      }
+
+      return await fetchJson<ListServerPersonalPhotosResponse>(
+        fetchImpl,
+        joinApiUrl(baseUrl, "", `/api/profile/${encodeURIComponent(profileSlug)}/photos`)
+      );
+    }
+  }
+
+  return await fetchJson<ListServerPersonalPhotosResponse>(
+    fetchImpl,
+    getPhotosListUrl(baseUrl, apiBasePath)
+  );
 }
 
 async function readErrorText(response: Response): Promise<string> {
@@ -179,6 +268,7 @@ function toServerPhotoFields(photo: PhotoRecord): ServerPhotoFields {
     title: photo.title,
     date: photo.date,
     type: "personal",
+    profileId: photo.profileId ?? DEFAULT_PROFILE_ID,
     note: photo.note,
     offsetY: photo.offsetY,
     offsetXDays: photo.offsetXDays,
@@ -242,6 +332,7 @@ async function serverPhotoDtoToPhotoRecord(
     title: dto.title,
     date: dto.date,
     type: "personal",
+    profileId: dto.profileId ?? DEFAULT_PROFILE_ID,
     imageBlob,
     previewBlob,
     offsetY: dto.offsetY,
@@ -274,9 +365,10 @@ export function createServerPersonalPhotoStorage(
 
   return {
     async getAllPhotos(): Promise<PhotoRecord[]> {
-      const response = await fetchJson<ListServerPersonalPhotosResponse>(
+      const response = await fetchPhotosListResponse(
         fetchImpl,
-        apiUrl("/photos")
+        options.baseUrl,
+        apiBasePath
       );
       return await Promise.all(
         response.photos.map((photo) => serverPhotoDtoToPhotoRecord(photo, fetchImpl))
@@ -284,9 +376,10 @@ export function createServerPersonalPhotoStorage(
     },
 
     async getPhoto(id: string): Promise<PhotoRecord | null> {
-      const response = await fetchJson<ListServerPersonalPhotosResponse>(
+      const response = await fetchPhotosListResponse(
         fetchImpl,
-        apiUrl("/photos")
+        options.baseUrl,
+        apiBasePath
       );
       const photo = response.photos.find((item) => item.id === id);
       if (!photo) return null;
