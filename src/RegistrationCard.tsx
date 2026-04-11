@@ -8,9 +8,13 @@ type RegistrationCardProps = {
     profileSlug: string,
     rememberedUser: RememberedBrowserUser | null
   ) => void;
+  onBack?: () => void;
 };
 
-export function RegistrationCard({ onRegistered }: RegistrationCardProps) {
+export function RegistrationCard({
+  onRegistered,
+  onBack,
+}: RegistrationCardProps) {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [requestedSlug, setRequestedSlug] = useState("");
@@ -55,7 +59,7 @@ export function RegistrationCard({ onRegistered }: RegistrationCardProps) {
   return (
     <section className="registration-card">
       <div className="registration-card-eyebrow">Новый пользователь</div>
-      <h2 className="registration-card-title">Создать свой профиль</h2>
+      <h2 className="registration-card-title">Создать учётную запись</h2>
       <p className="registration-card-copy">
         Если вы здесь впервые, зарегистрируйтесь один раз. Мы сразу создадим ваш
         профиль и переведём вас в него.
@@ -110,6 +114,15 @@ export function RegistrationCard({ onRegistered }: RegistrationCardProps) {
         >
           {submitting ? "Создание профиля…" : "Зарегистрироваться"}
         </button>
+        {onBack && (
+          <button
+            type="button"
+            className="registration-secondary-action"
+            onClick={onBack}
+          >
+            Назад
+          </button>
+        )}
       </form>
     </section>
   );

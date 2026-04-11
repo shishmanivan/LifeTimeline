@@ -11,9 +11,13 @@ type RecoverAccessCardProps = {
     profileSlug: string,
     rememberedUser: RememberedBrowserUser | null
   ) => void;
+  onBack?: () => void;
 };
 
-export function RecoverAccessCard({ onRecovered }: RecoverAccessCardProps) {
+export function RecoverAccessCard({
+  onRecovered,
+  onBack,
+}: RecoverAccessCardProps) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [codeRequested, setCodeRequested] = useState(false);
@@ -87,15 +91,15 @@ export function RecoverAccessCard({ onRecovered }: RecoverAccessCardProps) {
 
   return (
     <section className="registration-card registration-card-secondary">
-      <div className="registration-card-eyebrow">Возврат доступа</div>
-      <h2 className="registration-card-title">Вернуть доступ к профилю</h2>
+      <div className="registration-card-eyebrow">Вход</div>
+      <h2 className="registration-card-title">Войти</h2>
       <p className="registration-card-copy">
-        Если профиль уже создан, запросите одноразовый recovery code и подтвердите
-        его, чтобы снова открыть свой профиль в этом браузере.
+        Укажите email, чтобы получить одноразовый recovery code и войти в этот
+        браузер.
       </p>
       <p className="registration-card-copy">
-        Recovery code не возвращается в публичный API. Для текущего MVP он
-        доступен только через внутренний dev/admin канал.
+        Не можете войти? Этим же способом можно восстановить доступ к уже
+        созданному профилю.
       </p>
 
       <form
@@ -148,6 +152,15 @@ export function RecoverAccessCard({ onRecovered }: RecoverAccessCardProps) {
               ? "Подтвердить recovery code"
               : "Запросить recovery code"}
         </button>
+        {onBack && (
+          <button
+            type="button"
+            className="registration-secondary-action"
+            onClick={onBack}
+          >
+            Назад
+          </button>
+        )}
       </form>
     </section>
   );

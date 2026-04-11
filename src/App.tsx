@@ -371,6 +371,9 @@ function App() {
     personalPhotoStorageIsServerMode && !canWrite;
   const [userSessionSettingsModalOpen, setUserSessionSettingsModalOpen] =
     useState(false);
+  const [landingAuthView, setLandingAuthView] = useState<
+    "menu" | "register" | "login"
+  >("menu");
   const handleBrowserActiveSignOut = useCallback(() => {
     clearActiveBrowserUser();
     setActiveBrowserUser(null);
@@ -2106,6 +2109,10 @@ function App() {
     /** Step 6 baseline 112px; Step 7 ~20% smaller → 112 × 0.8 ≈ 90. */
     const landingAvatarPx = 90;
     const landingPageBg = "#e6e6e6";
+    const landingSessionUser = rememberedBrowserUser ?? activeBrowserUser;
+    const isRememberedUserActive =
+      rememberedBrowserUser != null &&
+      activeBrowserUser?.userId === rememberedBrowserUser.userId;
     return (
       <div
         className="page"
@@ -2116,184 +2123,173 @@ function App() {
           color: "#111",
         }}
       >
-        <main
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            minHeight: 0,
-            width: "100%",
-            padding: "24px 16px",
-            boxSizing: "border-box",
-            background: "transparent",
-            gap: "24px",
-          }}
-        >
-          <div
-            style={{
-              position: "relative",
-              width: "fit-content",
-              maxWidth: "min(88vw, 680px)",
-              margin: 0,
-              background: "transparent",
-            }}
-          >
-            <img
-              src={ppyMainLogoUrl}
-              alt="PastPresentYou"
-              style={{
-                display: "block",
-                width: "100%",
-                maxWidth: "680px",
-                height: "auto",
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                right: "12%",
-                bottom: "2%",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "0.5rem",
-                zIndex: 1,
-                maxWidth: "42%",
-                pointerEvents: "none",
-              }}
-            >
-              <a
-                href="/ivan"
-                className="landing-owner-photo-invite"
-                style={{
-                  display: "block",
-                  lineHeight: 0,
-                  borderRadius: "50%",
-                  pointerEvents: "auto",
-                }}
-              >
+        <main className="landing-main">
+          <div className="landing-shell">
+            <div className="landing-visual">
+              <div className="landing-logo-wrap">
                 <img
-                  src={ivanPhotoUrl}
-                  alt="Открыть профиль"
-                  width={landingAvatarPx}
-                  height={landingAvatarPx}
+                  src={ppyMainLogoUrl}
+                  alt="PastPresentYou"
                   style={{
-                    width: "min(90px, 18vw)",
-                    height: "min(90px, 18vw)",
-                    borderRadius: "50%",
-                    objectFit: "cover",
                     display: "block",
+                    width: "100%",
+                    maxWidth: "680px",
+                    height: "auto",
                   }}
                 />
-              </a>
-              <p
-                style={{
-                  margin: 0,
-                  textAlign: "center",
-                  fontSize: "clamp(0.78rem, 2.4vw, 0.95rem)",
-                  lineHeight: 1.25,
-                  color: "#111",
-                }}
-              >
-                Посмотрите мой профиль
-              </p>
-            </div>
-          </div>
-          <div className="landing-actions">
-            {rememberedBrowserUser && (
-              <section className="registration-card registration-card-primary">
-                <div className="registration-card-eyebrow">Текущий браузер</div>
-                <h2 className="registration-card-title" style={{ marginBottom: 8 }}>
-                  {activeBrowserUser?.userId === rememberedBrowserUser.userId
-                    ? "Вы вошли"
-                    : "Сохранённый профиль"}
-                </h2>
-                <p className="registration-card-copy" style={{ marginBottom: 12 }}>
-                  {activeBrowserUser?.userId === rememberedBrowserUser.userId ? (
-                    <>
-                      Вы вошли как{" "}
-                      <strong>{rememberedBrowserUser.profileDisplayName}</strong>{" "}
-                      (`@{rememberedBrowserUser.profileSlug}`).
-                    </>
-                  ) : (
-                    <>
-                      В этом браузере сохранён профиль{" "}
-                      <strong>{rememberedBrowserUser.profileDisplayName}</strong>{" "}
-                      (`@{rememberedBrowserUser.profileSlug}`). Чтобы редактировать
-                      личный слой, войдите явно.
-                    </>
-                  )}
-                </p>
-                {activeBrowserUser?.userId === rememberedBrowserUser.userId ? (
+                <div className="landing-owner-invite">
                   <a
-                    className="registration-submit registration-submit-link"
-                    href={`/${rememberedBrowserUser.profileSlug}`}
-                  >
-                    Открыть мой профиль
-                  </a>
-                ) : (
-                  <button
-                    type="button"
-                    className="registration-submit"
-                    onClick={() => {
-                      saveActiveBrowserUser(rememberedBrowserUser);
-                      setActiveBrowserUser(rememberedBrowserUser);
-                      if (typeof window !== "undefined") {
-                        window.location.assign(
-                          `/${rememberedBrowserUser.profileSlug}`
-                        );
-                      }
+                    href="/ivan"
+                    className="landing-owner-photo-invite"
+                    style={{
+                      display: "block",
+                      lineHeight: 0,
+                      borderRadius: "50%",
+                      pointerEvents: "auto",
                     }}
                   >
-                    Войти как {rememberedBrowserUser.profileDisplayName}
-                  </button>
-                )}
-                {activeBrowserUser && (
-                  <button
-                    type="button"
-                    className="landing-browser-sign-out"
-                    onClick={handleBrowserActiveSignOut}
-                  >
-                    Выйти
-                  </button>
-                )}
-              </section>
-            )}
-            {activeBrowserUser && !rememberedBrowserUser && (
-              <button
-                type="button"
-                className="landing-browser-sign-out landing-browser-sign-out-standalone"
-                onClick={handleBrowserActiveSignOut}
-              >
-                Выйти из сессии
-              </button>
-            )}
-            <RecoverAccessCard
-              onRecovered={(profileSlug, rememberedUser) => {
-                setRememberedBrowserUser(rememberedUser);
-                if (rememberedUser) {
-                  saveActiveBrowserUser(rememberedUser);
-                  setActiveBrowserUser(rememberedUser);
-                }
-                if (typeof window !== "undefined") {
-                  window.location.assign(`/${profileSlug}`);
-                }
-              }}
-            />
-            <RegistrationCard
-              onRegistered={(profileSlug, rememberedUser) => {
-                setRememberedBrowserUser(rememberedUser);
-                if (rememberedUser) {
-                  saveActiveBrowserUser(rememberedUser);
-                  setActiveBrowserUser(rememberedUser);
-                }
-                if (typeof window !== "undefined") {
-                  window.location.assign(`/${profileSlug}`);
-                }
-              }}
-            />
+                    <img
+                      src={ivanPhotoUrl}
+                      alt="Открыть профиль"
+                      width={landingAvatarPx}
+                      height={landingAvatarPx}
+                      style={{
+                        width: "min(90px, 18vw)",
+                        height: "min(90px, 18vw)",
+                        borderRadius: "50%",
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                    />
+                  </a>
+                  <p className="landing-owner-invite-copy">
+                    Посмотрите мой профиль
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="landing-auth-column">
+              {landingSessionUser && (
+                <section className="registration-card registration-card-primary">
+                  <div className="registration-card-eyebrow">Этот браузер</div>
+                  <h2 className="registration-card-title">
+                    {isRememberedUserActive ? "Вы вошли" : "Сохранённый доступ"}
+                  </h2>
+                  <p className="registration-card-copy" style={{ marginBottom: 12 }}>
+                    {rememberedBrowserUser ? (
+                      isRememberedUserActive ? (
+                        <>
+                          Вы вошли как{" "}
+                          <strong>{rememberedBrowserUser.profileDisplayName}</strong>{" "}
+                          (`@{rememberedBrowserUser.profileSlug}`).
+                        </>
+                      ) : (
+                        <>
+                          В этом браузере сохранён профиль{" "}
+                          <strong>{rememberedBrowserUser.profileDisplayName}</strong>{" "}
+                          (`@{rememberedBrowserUser.profileSlug}`). Можно быстро
+                          войти и продолжить работу.
+                        </>
+                      )
+                    ) : (
+                      <>
+                        В этом браузере активна сессия{" "}
+                        <strong>{landingSessionUser.profileDisplayName}</strong>{" "}
+                        (`@{landingSessionUser.profileSlug}`).
+                      </>
+                    )}
+                  </p>
+                  {activeBrowserUser?.userId === landingSessionUser.userId ? (
+                    <a
+                      className="registration-submit registration-submit-link"
+                      href={`/${landingSessionUser.profileSlug}`}
+                    >
+                      Открыть мой профиль
+                    </a>
+                  ) : rememberedBrowserUser ? (
+                    <button
+                      type="button"
+                      className="registration-submit"
+                      onClick={() => {
+                        saveActiveBrowserUser(rememberedBrowserUser);
+                        setActiveBrowserUser(rememberedBrowserUser);
+                        if (typeof window !== "undefined") {
+                          window.location.assign(`/${rememberedBrowserUser.profileSlug}`);
+                        }
+                      }}
+                    >
+                      Войти как {rememberedBrowserUser.profileDisplayName}
+                    </button>
+                  ) : null}
+                  {activeBrowserUser && (
+                    <button
+                      type="button"
+                      className="landing-browser-sign-out"
+                      onClick={handleBrowserActiveSignOut}
+                    >
+                      Выйти
+                    </button>
+                  )}
+                </section>
+              )}
+
+              {!activeBrowserUser &&
+                (landingAuthView === "register" ? (
+                  <RegistrationCard
+                    onBack={() => setLandingAuthView("menu")}
+                    onRegistered={(profileSlug, rememberedUser) => {
+                      setRememberedBrowserUser(rememberedUser);
+                      if (rememberedUser) {
+                        saveActiveBrowserUser(rememberedUser);
+                        setActiveBrowserUser(rememberedUser);
+                      }
+                      if (typeof window !== "undefined") {
+                        window.location.assign(`/${profileSlug}`);
+                      }
+                    }}
+                  />
+                ) : landingAuthView === "login" ? (
+                  <RecoverAccessCard
+                    onBack={() => setLandingAuthView("menu")}
+                    onRecovered={(profileSlug, rememberedUser) => {
+                      setRememberedBrowserUser(rememberedUser);
+                      if (rememberedUser) {
+                        saveActiveBrowserUser(rememberedUser);
+                        setActiveBrowserUser(rememberedUser);
+                      }
+                      if (typeof window !== "undefined") {
+                        window.location.assign(`/${profileSlug}`);
+                      }
+                    }}
+                  />
+                ) : (
+                  <section className="registration-card registration-card-primary landing-auth-entry-card">
+                    <div className="registration-card-eyebrow">Доступ</div>
+                    <h2 className="registration-card-title">Начать работу</h2>
+                    <p className="registration-card-copy">
+                      Создайте новую учётную запись или войдите в уже существующий
+                      профиль через одноразовый code.
+                    </p>
+                    <div className="landing-auth-entry-actions">
+                      <button
+                        type="button"
+                        className="registration-submit"
+                        onClick={() => setLandingAuthView("register")}
+                      >
+                        Создать учётную запись
+                      </button>
+                      <button
+                        type="button"
+                        className="registration-secondary-action"
+                        onClick={() => setLandingAuthView("login")}
+                      >
+                        Войти
+                      </button>
+                    </div>
+                  </section>
+                ))}
+            </div>
           </div>
         </main>
       </div>
