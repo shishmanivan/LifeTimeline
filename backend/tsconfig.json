@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["./**/*.ts", "../src/serverPersonalPhotoStorage.ts", "../src/personalPhotoStorage.ts", "../src/db.ts", "../src/vite-env.d.ts"]
+  "include": ["./**/*.ts", "../src/serverPersonalPhotoStorage.ts", "../src/personalPhotoStorage.ts", "../src/db.ts", "../src/profileModel.ts", "../src/userModel.ts", "../src/vite-env.d.ts"]
 }

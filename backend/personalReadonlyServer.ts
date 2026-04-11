@@ -3,11 +3,17 @@ import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { getProfileBySlug } from "./profiles";
+import {
+  getProfileBySlug,
+  getProfileDatasetScope,
+  listProfilesForAdmin,
+} from "./profiles";
 import {
   deletePreparedPhotosInDay,
   deletePreparedPhoto,
   ensurePreparedPersonalDataset,
+  readPreparedPhotoProfileId,
+  readPreparedPhotoProfileIdsInDay,
   readPreparedPersonalDataset,
   replacePreparedPhotoImage,
   resolveAssetFilePath,
@@ -25,7 +31,25 @@ import {
   resolvePreparedPersonalDataDir,
   type PreparedPersonalDatasetScope,
 } from "./personalDatasetResolver";
+import { ensureIdentityStore } from "./identityStore";
 import { evaluatePersonalWriteOwnership } from "./personalWriteOwnershipGuard";
+import {
+  registerUser,
+  RegistrationError,
+} from "./registrationService";
+import {
+  requestRecoveryCode,
+  verifyRecoveryCode,
+  RecoveryError,
+} from "./recoveryService";
+import type {
+  RecoverAccessInput,
+  RegisterUserInput,
+  RequestRecoveryCodeInput,
+  VerifyRecoveryCodeInput,
+} from "../src/userModel";
+import { getUserByMvpWriteAccessToken } from "./userRegistry";
+import { getMvpBackendCurrentUserProfileId } from "./mvpOwnerContext";
 
 type PersonalReadonlyServerConfig = {
   host: string;
@@ -33,6 +57,10 @@ type PersonalReadonlyServerConfig = {
   publicBaseUrl?: string;
   writeToken?: string;
 };
+
+type ResolvedWriteActor =
+  | { kind: "admin"; profileId: string }
+  | { kind: "user"; profileId: string; userId: string };
 
 function personalPreparedDatasetDir(
   scope?: PreparedPersonalDatasetScope
@@ -52,7 +80,7 @@ function getConfig(): PersonalReadonlyServerConfig {
     host: process.env.PERSONAL_PHOTO_SERVER_HOST || DEFAULT_HOST,
     port: Number.isFinite(parsedPort) ? parsedPort : DEFAULT_PORT,
     publicBaseUrl: process.env.PERSONAL_PHOTO_PUBLIC_BASE_URL,
-    writeToken: process.env.PERSONAL_PHOTO_WRITE_TOKEN?.trim() || undefined,
+    writeToken: process.env.PERSONAL_WRITE_TOKEN?.trim() || undefined,
   };
 }
 
@@ -98,10 +126,55 @@ function hasValidWriteToken(
   req: IncomingMessage,
   configuredToken: string | undefined
 ): boolean {
-  if (!configuredToken) return true;
+  if (!configuredToken) return false;
   const header = req.headers[PERSONAL_WRITE_TOKEN_HEADER];
   const requestToken = Array.isArray(header) ? header[0] : header;
   return typeof requestToken === "string" && requestToken === configuredToken;
+}
+
+function getRequestWriteToken(req: IncomingMessage): string | undefined {
+  const header = req.headers[PERSONAL_WRITE_TOKEN_HEADER];
+  const requestToken = Array.isArray(header) ? header[0] : header;
+  return typeof requestToken === "string" ? requestToken : undefined;
+}
+
+async function resolveWriteActor(
+  req: IncomingMessage,
+  configuredAdminToken: string | undefined
+): Promise<ResolvedWriteActor | null> {
+  const requestToken = getRequestWriteToken(req);
+  if (!requestToken) return null;
+
+  if (configuredAdminToken && requestToken === configuredAdminToken) {
+    return {
+      kind: "admin",
+      profileId: getMvpBackendCurrentUserProfileId(),
+    };
+  }
+
+  const user = await getUserByMvpWriteAccessToken(requestToken);
+  if (!user || !user.primaryProfileId) {
+    return null;
+  }
+
+  return {
+    kind: "user",
+    userId: user.id,
+    profileId: user.primaryProfileId,
+  };
+}
+
+function ensureAdminAccess(
+  req: IncomingMessage,
+  res: ServerResponse,
+  configuredAdminToken: string | undefined
+): boolean {
+  if (hasValidWriteToken(req, configuredAdminToken)) {
+    return true;
+  }
+
+  sendText(res, 403, "Missing or invalid personal write token.");
+  return false;
 }
 
 function getMimeType(filePath: string): string {
@@ -288,6 +361,99 @@ function parsePhotoSeriesPatch(body: unknown): PreparedSeriesPatch {
 
   return {
     seriesId: body.seriesId,
+  };
+}
+
+function parseRegisterUserInput(body: unknown): RegisterUserInput {
+  if (!isRecord(body)) {
+    throw new RegistrationError(
+      "Registration body must be a JSON object.",
+      "invalid-input"
+    );
+  }
+
+  if (typeof body.email !== "string") {
+    throw new RegistrationError(
+      'Field "email" must be a string.',
+      "invalid-input"
+    );
+  }
+
+  if (typeof body.displayName !== "string") {
+    throw new RegistrationError(
+      'Field "displayName" must be a string.',
+      "invalid-input"
+    );
+  }
+
+  if (
+    "requestedSlug" in body &&
+    body.requestedSlug != null &&
+    typeof body.requestedSlug !== "string"
+  ) {
+    throw new RegistrationError(
+      'Field "requestedSlug" must be a string when provided.',
+      "invalid-input"
+    );
+  }
+
+  return {
+    email: body.email,
+    displayName: body.displayName,
+    requestedSlug:
+      typeof body.requestedSlug === "string" ? body.requestedSlug : undefined,
+  };
+}
+
+function parseRecoverAccessInput(body: unknown): RecoverAccessInput {
+  if (!isRecord(body)) {
+    throw new RecoveryError(
+      "Recovery body must be a JSON object.",
+      "invalid-input"
+    );
+  }
+
+  if (typeof body.email !== "string") {
+    throw new RecoveryError(
+      'Field "email" must be a string.',
+      "invalid-input"
+    );
+  }
+
+  return {
+    email: body.email,
+  };
+}
+
+function parseRequestRecoveryCodeInput(body: unknown): RequestRecoveryCodeInput {
+  return parseRecoverAccessInput(body);
+}
+
+function parseVerifyRecoveryCodeInput(body: unknown): VerifyRecoveryCodeInput {
+  if (!isRecord(body)) {
+    throw new RecoveryError(
+      "Recovery verification body must be a JSON object.",
+      "invalid-input"
+    );
+  }
+
+  if (typeof body.email !== "string") {
+    throw new RecoveryError(
+      'Field "email" must be a string.',
+      "invalid-input"
+    );
+  }
+
+  if (typeof body.code !== "string") {
+    throw new RecoveryError(
+      'Field "code" must be a string.',
+      "invalid-input"
+    );
+  }
+
+  return {
+    email: body.email,
+    code: body.code,
   };
 }
 
@@ -556,16 +722,93 @@ async function handleRequest(
     return;
   }
 
-  if (isWriteMethod(req.method) && !hasValidWriteToken(req, config.writeToken)) {
-    sendText(res, 401, "Missing or invalid personal write token.");
-    return;
-  }
-
   const requestUrl = new URL(
     req.url || "/",
     `http://${req.headers.host || `${config.host}:${config.port}`}`
   );
   const pathname = requestUrl.pathname;
+  const writeActor = isWriteMethod(req.method)
+    ? await resolveWriteActor(req, config.writeToken)
+    : null;
+
+  if (isWriteMethod(req.method) && !writeActor) {
+    sendText(res, 403, "Missing or invalid personal write token.");
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/register") {
+    try {
+      const input = parseRegisterUserInput(await readJsonBody(req));
+      const result = await registerUser(input);
+      sendJson(res, 201, result);
+      return;
+    } catch (error) {
+      if (error instanceof RegistrationError) {
+        const statusCode = error.code === "conflict" ? 409 : 400;
+        sendJson(res, statusCode, {
+          error: error.code,
+          message: error.message,
+        });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/recover-access/request-code") {
+    try {
+      const input = parseRequestRecoveryCodeInput(await readJsonBody(req));
+      const result = await requestRecoveryCode(input);
+      sendJson(res, 200, result);
+      return;
+    } catch (error) {
+      if (error instanceof RecoveryError) {
+        const statusCode =
+          error.code === "not-found" || error.code === "profile-missing"
+            ? 404
+            : 400;
+        sendJson(res, statusCode, {
+          error: error.code,
+          message: error.message,
+        });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/recover-access/verify-code") {
+    try {
+      const input = parseVerifyRecoveryCodeInput(await readJsonBody(req));
+      const result = await verifyRecoveryCode(input);
+      sendJson(res, 200, result);
+      return;
+    } catch (error) {
+      if (error instanceof RecoveryError) {
+        const statusCode =
+          error.code === "not-found" || error.code === "profile-missing"
+            ? 404
+            : 400;
+        sendJson(res, statusCode, {
+          error: error.code,
+          message: error.message,
+        });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  if (req.method === "GET" && pathname === "/api/admin/profiles") {
+    if (!ensureAdminAccess(req, res, config.writeToken)) {
+      return;
+    }
+
+    sendJson(res, 200, {
+      profiles: await listProfilesForAdmin(),
+    });
+    return;
+  }
 
   const photosByDateMatch = pathname.match(/^\/api\/personal\/photos\/by-date\/([^/]+)$/);
   if (req.method === "DELETE" && photosByDateMatch) {
@@ -575,9 +818,32 @@ async function handleRequest(
       return;
     }
 
+    const profileIdsInDay = await readPreparedPhotoProfileIdsInDay(
+      personalPreparedDatasetDir(),
+      date
+    );
+    const targetProfileId =
+      profileIdsInDay.length > 0
+        ? profileIdsInDay.every((profileId) => profileId === profileIdsInDay[0])
+          ? profileIdsInDay[0]
+          : null
+        : undefined;
+    if (targetProfileId === null) {
+      sendText(
+        res,
+        403,
+        "Deleting photos across multiple profiles is not allowed."
+      );
+      return;
+    }
+
     const byDateOwnership = evaluatePersonalWriteOwnership({
       operation: "delete-photos-by-date",
       date,
+    }, {
+      actorProfileId: writeActor?.profileId,
+      actorKind: writeActor?.kind,
+      targetProfileId,
     });
     if (!byDateOwnership.allowed) {
       sendText(res, byDateOwnership.statusCode, byDateOwnership.message);
@@ -593,10 +859,16 @@ async function handleRequest(
   if (req.method === "PUT" && photoSaveMatch) {
     const photoId = decodeURIComponent(photoSaveMatch[1]);
     const payload = await parsePhotoSaveRequest(req, photoId);
+    if (!payload.metadata.profileId && writeActor?.kind === "user") {
+      payload.metadata.profileId = writeActor.profileId;
+    }
     const saveOwnership = evaluatePersonalWriteOwnership({
       operation: "upsert-photo",
       photoId,
       profileId: payload.metadata.profileId,
+    }, {
+      actorProfileId: writeActor?.profileId,
+      actorKind: writeActor?.kind,
     });
     if (!saveOwnership.allowed) {
       sendText(res, saveOwnership.statusCode, saveOwnership.message);
@@ -621,9 +893,17 @@ async function handleRequest(
   const photoDeleteMatch = pathname.match(/^\/api\/personal\/photos\/([^/]+)$/);
   if (req.method === "DELETE" && photoDeleteMatch) {
     const photoId = decodeURIComponent(photoDeleteMatch[1]);
+    const targetProfileId = await readPreparedPhotoProfileId(
+      personalPreparedDatasetDir(),
+      photoId
+    );
     const deleteOwnership = evaluatePersonalWriteOwnership({
       operation: "delete-photo",
       photoId,
+    }, {
+      actorProfileId: writeActor?.profileId,
+      actorKind: writeActor?.kind,
+      targetProfileId,
     });
     if (!deleteOwnership.allowed) {
       sendText(res, deleteOwnership.statusCode, deleteOwnership.message);
@@ -643,9 +923,17 @@ async function handleRequest(
   if (req.method === "PUT" && photoImageMatch) {
     const photoId = decodeURIComponent(photoImageMatch[1]);
     const payload = await parsePhotoImageUpdateRequest(req);
+    const targetProfileId = await readPreparedPhotoProfileId(
+      personalPreparedDatasetDir(),
+      photoId
+    );
     const imageOwnership = evaluatePersonalWriteOwnership({
       operation: "replace-photo-image",
       photoId,
+    }, {
+      actorProfileId: writeActor?.profileId,
+      actorKind: writeActor?.kind,
+      targetProfileId,
     });
     if (!imageOwnership.allowed) {
       sendText(res, imageOwnership.statusCode, imageOwnership.message);
@@ -677,9 +965,17 @@ async function handleRequest(
   if (req.method === "PATCH" && metadataMatch) {
     const photoId = decodeURIComponent(metadataMatch[1]);
     const patch = parsePhotoMetadataPatch(await readJsonBody(req));
+    const targetProfileId = await readPreparedPhotoProfileId(
+      personalPreparedDatasetDir(),
+      photoId
+    );
     const metadataOwnership = evaluatePersonalWriteOwnership({
       operation: "patch-photo-metadata",
       photoId,
+    }, {
+      actorProfileId: writeActor?.profileId,
+      actorKind: writeActor?.kind,
+      targetProfileId,
     });
     if (!metadataOwnership.allowed) {
       sendText(res, metadataOwnership.statusCode, metadataOwnership.message);
@@ -711,9 +1007,17 @@ async function handleRequest(
   if (req.method === "PATCH" && photoSeriesMatch) {
     const photoId = decodeURIComponent(photoSeriesMatch[1]);
     const patch = parsePhotoSeriesPatch(await readJsonBody(req));
+    const targetProfileId = await readPreparedPhotoProfileId(
+      personalPreparedDatasetDir(),
+      photoId
+    );
     const photoSeriesOwnership = evaluatePersonalWriteOwnership({
       operation: "patch-photo-series",
       photoId,
+    }, {
+      actorProfileId: writeActor?.profileId,
+      actorKind: writeActor?.kind,
+      targetProfileId,
     });
     if (!photoSeriesOwnership.allowed) {
       sendText(res, photoSeriesOwnership.statusCode, photoSeriesOwnership.message);
@@ -751,6 +1055,9 @@ async function handleRequest(
     const seriesOwnership = evaluatePersonalWriteOwnership({
       operation: "upsert-series",
       seriesId,
+    }, {
+      actorProfileId: writeActor?.profileId,
+      actorKind: writeActor?.kind,
     });
     if (!seriesOwnership.allowed) {
       sendText(res, seriesOwnership.statusCode, seriesOwnership.message);
@@ -764,7 +1071,7 @@ async function handleRequest(
 const profileMatch = pathname.match(/^\/api\/profile\/([^/]+)$/);
 if (req.method === "GET" && profileMatch) {
   const slug = decodeURIComponent(profileMatch[1]);
-  const profile = getProfileBySlug(slug);
+  const profile = await getProfileBySlug(slug);
 
   if (!profile) {
     sendJson(res, 404, { error: "Profile not found" });
@@ -778,7 +1085,7 @@ if (req.method === "GET" && profileMatch) {
 const profilePhotosMatch = pathname.match(/^\/api\/profile\/([^/]+)\/photos$/);
 if (req.method === "GET" && profilePhotosMatch) {
   const slug = decodeURIComponent(profilePhotosMatch[1]);
-  const profile = getProfileBySlug(slug);
+  const profile = await getProfileBySlug(slug);
 
   if (!profile) {
     sendJson(res, 404, { error: "Profile not found" });
@@ -786,11 +1093,11 @@ if (req.method === "GET" && profilePhotosMatch) {
   }
 
   const dataset = await readPreparedPersonalDataset(
-    personalPreparedDatasetDir({ profileId: profile.id }),
+    personalPreparedDatasetDir(getProfileDatasetScope(profile)),
     getPublicBaseUrl(req, config.publicBaseUrl)
   );
   const photos = dataset.photosResponse.photos.filter(
-    (photo) => photo.profileId === profile.id
+    (photo) => photo.profileId === profile.personalDataset.profileId
   );
 
   sendJson(res, 200, { photos });
@@ -848,6 +1155,7 @@ if (req.method === "GET" && profilePhotosMatch) {
 
 async function main(): Promise<void> {
   const config = getConfig();
+  await ensureIdentityStore();
   await ensurePreparedPersonalDataset(personalPreparedDatasetDir());
 
   const server = createServer((req, res) => {
@@ -864,7 +1172,7 @@ async function main(): Promise<void> {
     console.log(`[personal-backend] photos: ${publicBaseUrl}/api/personal/photos`);
     console.log(`[personal-backend] series: ${publicBaseUrl}/api/personal/series`);
     console.log(
-      `[personal-backend] write auth: ${config.writeToken ? "enabled" : "disabled (dev fallback)"}`
+      `[personal-backend] write auth: ${config.writeToken ? "enabled" : "locked (PERSONAL_WRITE_TOKEN not set)"}`
     );
   });
 }

@@ -488,7 +488,7 @@ export function PersonalPhotoModal({
                   />
                 </div>
                 <div className="personal-modal-edit-actions">
-                  {disableNonMetadataActions && (
+                  {disableNonMetadataActions && allowMetadataEdit && (
                     <p className="personal-readonly-note personal-readonly-note-compact">
                       {disabledActionsMessage}
                     </p>
@@ -622,20 +622,20 @@ export function PersonalPhotoModal({
                   {photo.note || "—"}
                 </div>
                 <div className="personal-modal-footer">
-                  {disableNonMetadataActions && (
+                  {disableNonMetadataActions && allowMetadataEdit && (
                     <p className="personal-readonly-note personal-readonly-note-compact">
                       {disabledActionsMessage}
                     </p>
                   )}
-                  <button
-                    type="button"
-                    className="personal-modal-btn-edit"
-                    onClick={onEdit}
-                    disabled={!allowMetadataEdit}
-                    title={!allowMetadataEdit ? disabledActionsMessage : undefined}
-                  >
-                    Редактировать
-                  </button>
+                  {allowMetadataEdit && (
+                    <button
+                      type="button"
+                      className="personal-modal-btn-edit"
+                      onClick={onEdit}
+                    >
+                      Редактировать
+                    </button>
+                  )}
                 </div>
               </>
             )}

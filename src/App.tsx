@@ -3,8 +3,9 @@ import {
   getHistoricalEventsInRange,
 } from "./db";
 import {
-  personalPhotoStorage,
-  personalPhotoCapabilities,
+  createSelectedPersonalPhotoStorage,
+  getPersonalPhotoCapabilities,
+  loadSelectedAdminProfiles,
   personalPhotoStorageIsServerMode,
 } from "./personalPhotoStorageSelector";
 import type { PhotoRecord } from "./personalPhotoStorage";
@@ -19,6 +20,7 @@ import {
   getMvpSeededCurrentUser,
   type MvpCurrentUser,
 } from "./mvpOwnerAuth";
+import { getProfileDatasetProfileId } from "./profileModel";
 import type { HistoricalEvent } from "./history/types";
 import { runHistoryIngest } from "./history/ingestHistory";
 import { generatePreviewBlob } from "./imagePreview";
@@ -44,26 +46,21 @@ import {
 import { HistoricalEventModal } from "./HistoricalEventModal";
 import { PersonalPhotoModal } from "./PersonalPhotoModal";
 import { DataBackupModal } from "./DataBackupModal";
+import { AdminFunctionsModal } from "./AdminFunctionsModal";
+import { UserSessionSettingsModal } from "./UserSessionSettingsModal";
+import { RegistrationCard } from "./RegistrationCard";
+import { RecoverAccessCard } from "./RecoverAccessCard";
+import {
+  clearActiveBrowserUser,
+  clearRememberedBrowserUser,
+  loadActiveBrowserUser,
+  loadRememberedBrowserUser,
+  saveActiveBrowserUser,
+} from "./browserUserIdentity";
 import ppyMainLogoUrl from "../PPYMainLogo.png";
 import ivanPhotoUrl from "../IvanPhoto.JPG";
 
 export type { Offsets };
-
-const {
-  assignPersonalLaneIndex,
-  deletePhoto,
-  deletePhotosInDay,
-  getAllPhotos,
-  getAllSeries,
-  getPhoto,
-  savePhoto,
-  saveSeries,
-  updatePhotoImage,
-  updatePhotoMetadata,
-  updatePhotoOffsets,
-  updatePhotoPreview,
-  updatePhotoSeriesId,
-} = personalPhotoStorage;
 
 const PERSONAL_SERVER_DISABLED_WRITES_MESSAGE =
   "Server mode: delete-all-in-day and backup writes are still disabled";
@@ -326,7 +323,38 @@ function AddPhotoModal({ onClose, onSubmit }: AddPhotoModalProps) {
 }
 
 function App() {
+  const [rememberedBrowserUser, setRememberedBrowserUser] = useState(() =>
+    loadRememberedBrowserUser()
+  );
+  const [activeBrowserUser, setActiveBrowserUser] = useState(() =>
+    loadActiveBrowserUser()
+  );
+  const personalPhotoStorage = useMemo(
+    () => createSelectedPersonalPhotoStorage(),
+    [activeBrowserUser]
+  );
+  const personalPhotoCapabilities = useMemo(
+    () => getPersonalPhotoCapabilities(),
+    [activeBrowserUser]
+  );
   const {
+    assignPersonalLaneIndex,
+    deletePhoto,
+    deletePhotosInDay,
+    getAllPhotos,
+    getAllSeries,
+    getPhoto,
+    savePhoto,
+    saveSeries,
+    updatePhotoImage,
+    updatePhotoMetadata,
+    updatePhotoOffsets,
+    updatePhotoPreview,
+    updatePhotoSeriesId,
+  } = personalPhotoStorage;
+  const {
+    canWrite,
+    canAdminWrite,
     canAddPhoto,
     canAddPhotoToDay,
     canDeleteAllPhotosInDay,
@@ -339,6 +367,30 @@ function App() {
     canUnlinkSeries,
     canWritePreview,
   } = personalPhotoCapabilities;
+  const publicServerReadOnlyUx =
+    personalPhotoStorageIsServerMode && !canWrite;
+  const [userSessionSettingsModalOpen, setUserSessionSettingsModalOpen] =
+    useState(false);
+  const handleBrowserActiveSignOut = useCallback(() => {
+    clearActiveBrowserUser();
+    setActiveBrowserUser(null);
+    setUserSessionSettingsModalOpen(false);
+  }, []);
+  const handleForgetThisDevice = useCallback(() => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Удалить сохранённые данные профиля в этом браузере? Понадобится снова войти или восстановить доступ."
+      )
+    ) {
+      return;
+    }
+    clearActiveBrowserUser();
+    clearRememberedBrowserUser();
+    setActiveBrowserUser(null);
+    setRememberedBrowserUser(null);
+    setUserSessionSettingsModalOpen(false);
+  }, []);
   const persisted = useMemo(loadTimelineState, []);
 
   const [scaleIndex, setScaleIndex] = useState(() => {
@@ -362,6 +414,10 @@ function App() {
   const [gotoDateModalOpen, setGotoDateModalOpen] = useState(false);
   const [layersModalOpen, setLayersModalOpen] = useState(false);
   const [dataBackupModalOpen, setDataBackupModalOpen] = useState(false);
+  const [adminFunctionsModalOpen, setAdminFunctionsModalOpen] = useState(false);
+  const [adminProfiles, setAdminProfiles] = useState<ServerProfileDto[]>([]);
+  const [adminProfilesLoading, setAdminProfilesLoading] = useState(false);
+  const [adminProfilesError, setAdminProfilesError] = useState<string | null>(null);
   const [visibleLayers, setVisibleLayers] = useState<Set<string>>(() => {
     const ids = LAYERS.map((l) => l.id) as string[];
     if ("visibleLayers" in persisted && Array.isArray(persisted.visibleLayers)) {
@@ -442,10 +498,22 @@ function App() {
     []
   );
   const isLandingRoute = currentPathname === "/";
-  const currentUser = useMemo<MvpCurrentUser | null>(
-    () => getMvpSeededCurrentUser(),
-    []
-  );
+  const currentUser = useMemo<MvpCurrentUser | null>(() => {
+    if (canAdminWrite) {
+      return getMvpSeededCurrentUser();
+    }
+
+    if (activeBrowserUser?.primaryProfileId) {
+      return {
+        id: activeBrowserUser.userId,
+        profileId: activeBrowserUser.primaryProfileId,
+        profileSlug: activeBrowserUser.profileSlug,
+        displayName: activeBrowserUser.profileDisplayName,
+      };
+    }
+
+    return null;
+  }, [canAdminWrite, activeBrowserUser]);
   const currentUserProfileId = currentUser?.profileId ?? null;
   const {
     routeProfileSlug,
@@ -469,6 +537,11 @@ function App() {
     }
     return getMvpOwnerCanonicalProfilePath();
   }, [activeProfile]);
+  const activeProfileDatasetProfileId = activeProfile
+    ? getProfileDatasetProfileId(activeProfile)
+    : null;
+  const canAccessAdminFunctions =
+    personalPhotoStorageIsServerMode && canAdminWrite;
   const canManageCurrentProfile = isOwnerViewingCurrentProfile;
   const canAddPhotoForCurrentView = canAddPhoto && canManageCurrentProfile;
   const canAddPhotoToDayForCurrentView =
@@ -650,6 +723,36 @@ function App() {
       console.error("[series] load failed", err)
     );
   }, [isLandingRoute, loadSeriesMapFromStorage]);
+
+  useEffect(() => {
+    if (!adminFunctionsModalOpen || !canAccessAdminFunctions) return;
+    let cancelled = false;
+
+    setAdminProfilesLoading(true);
+    setAdminProfilesError(null);
+    loadSelectedAdminProfiles()
+      .then((profiles) => {
+        if (!cancelled) {
+          setAdminProfiles(profiles);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setAdminProfilesError(
+            err instanceof Error ? err.message : String(err)
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAdminProfilesLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adminFunctionsModalOpen, canAccessAdminFunctions]);
 
   useEffect(() => {
     setCenterDate((prev) => clampCenterToToday(prev, scale));
@@ -1428,7 +1531,9 @@ function App() {
       title: caption || "Фото",
       date: safeDate,
       type: "personal",
-      ...(activeProfile ? { profileId: activeProfile.id } : {}),
+      ...(activeProfileDatasetProfileId
+        ? { profileId: activeProfileDatasetProfileId }
+        : {}),
       imageBlob: file,
       previewBlob,
       offsetY: 0,
@@ -1720,7 +1825,9 @@ function App() {
         title: "Фото",
         date: safeDate,
         type: "personal",
-        ...(activeProfile ? { profileId: activeProfile.id } : {}),
+        ...(activeProfileDatasetProfileId
+          ? { profileId: activeProfileDatasetProfileId }
+          : {}),
         imageBlob: file,
         previewBlob,
         offsetY: 0,
@@ -1763,7 +1870,7 @@ function App() {
       setOverlayUrl(image);
     },
     [
-      activeProfile,
+      activeProfileDatasetProfileId,
       canAddPhotoToDayForCurrentView,
       overlayPhotoId,
       personalPhotos,
@@ -2018,9 +2125,10 @@ function App() {
             justifyContent: "center",
             minHeight: 0,
             width: "100%",
-            padding: 0,
+            padding: "24px 16px",
             boxSizing: "border-box",
             background: "transparent",
+            gap: "24px",
           }}
         >
           <div
@@ -2093,6 +2201,100 @@ function App() {
               </p>
             </div>
           </div>
+          <div className="landing-actions">
+            {rememberedBrowserUser && (
+              <section className="registration-card registration-card-primary">
+                <div className="registration-card-eyebrow">Текущий браузер</div>
+                <h2 className="registration-card-title" style={{ marginBottom: 8 }}>
+                  {activeBrowserUser?.userId === rememberedBrowserUser.userId
+                    ? "Вы вошли"
+                    : "Сохранённый профиль"}
+                </h2>
+                <p className="registration-card-copy" style={{ marginBottom: 12 }}>
+                  {activeBrowserUser?.userId === rememberedBrowserUser.userId ? (
+                    <>
+                      Вы вошли как{" "}
+                      <strong>{rememberedBrowserUser.profileDisplayName}</strong>{" "}
+                      (`@{rememberedBrowserUser.profileSlug}`).
+                    </>
+                  ) : (
+                    <>
+                      В этом браузере сохранён профиль{" "}
+                      <strong>{rememberedBrowserUser.profileDisplayName}</strong>{" "}
+                      (`@{rememberedBrowserUser.profileSlug}`). Чтобы редактировать
+                      личный слой, войдите явно.
+                    </>
+                  )}
+                </p>
+                {activeBrowserUser?.userId === rememberedBrowserUser.userId ? (
+                  <a
+                    className="registration-submit registration-submit-link"
+                    href={`/${rememberedBrowserUser.profileSlug}`}
+                  >
+                    Открыть мой профиль
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    className="registration-submit"
+                    onClick={() => {
+                      saveActiveBrowserUser(rememberedBrowserUser);
+                      setActiveBrowserUser(rememberedBrowserUser);
+                      if (typeof window !== "undefined") {
+                        window.location.assign(
+                          `/${rememberedBrowserUser.profileSlug}`
+                        );
+                      }
+                    }}
+                  >
+                    Войти как {rememberedBrowserUser.profileDisplayName}
+                  </button>
+                )}
+                {activeBrowserUser && (
+                  <button
+                    type="button"
+                    className="landing-browser-sign-out"
+                    onClick={handleBrowserActiveSignOut}
+                  >
+                    Выйти
+                  </button>
+                )}
+              </section>
+            )}
+            {activeBrowserUser && !rememberedBrowserUser && (
+              <button
+                type="button"
+                className="landing-browser-sign-out landing-browser-sign-out-standalone"
+                onClick={handleBrowserActiveSignOut}
+              >
+                Выйти из сессии
+              </button>
+            )}
+            <RecoverAccessCard
+              onRecovered={(profileSlug, rememberedUser) => {
+                setRememberedBrowserUser(rememberedUser);
+                if (rememberedUser) {
+                  saveActiveBrowserUser(rememberedUser);
+                  setActiveBrowserUser(rememberedUser);
+                }
+                if (typeof window !== "undefined") {
+                  window.location.assign(`/${profileSlug}`);
+                }
+              }}
+            />
+            <RegistrationCard
+              onRegistered={(profileSlug, rememberedUser) => {
+                setRememberedBrowserUser(rememberedUser);
+                if (rememberedUser) {
+                  saveActiveBrowserUser(rememberedUser);
+                  setActiveBrowserUser(rememberedUser);
+                }
+                if (typeof window !== "undefined") {
+                  window.location.assign(`/${profileSlug}`);
+                }
+              }}
+            />
+          </div>
         </main>
       </div>
     );
@@ -2125,36 +2327,42 @@ function App() {
           >
             {ingestRefreshing ? "Загрузка…" : "Обновить таймлайн"}
           </button>
-          <button
-            type="button"
-            className="top-bar-btn"
-            onClick={() => {
-              if (canImportBackupForCurrentView) setDataBackupModalOpen(true);
-            }}
-            title={
-              !canImportBackupForCurrentView
-                ? PERSONAL_SERVER_DISABLED_WRITES_MESSAGE
-                : "Сохранить подписи и фото в файлы на диск"
-            }
-            disabled={!canImportBackupForCurrentView}
-          >
-            Резервная копия…
-          </button>
-          <button
-            type="button"
-            className="top-bar-btn"
-            onClick={() => {
-              if (canAddPhotoForCurrentView) setModalOpen(true);
-            }}
-            title={
-              !canAddPhotoForCurrentView
-                ? PERSONAL_SERVER_DISABLED_WRITES_MESSAGE
-                : undefined
-            }
-            disabled={!canAddPhotoForCurrentView}
-          >
-            + Добавить фото
-          </button>
+          {canAccessAdminFunctions && (
+            <button
+              type="button"
+              className="top-bar-btn"
+              onClick={() => setAdminFunctionsModalOpen(true)}
+            >
+              Админ функции
+            </button>
+          )}
+          {canImportBackupForCurrentView && (
+            <button
+              type="button"
+              className="top-bar-btn"
+              onClick={() => setDataBackupModalOpen(true)}
+              title="Сохранить подписи и фото в файлы на диск"
+            >
+              Резервная копия…
+            </button>
+          )}
+          {!publicServerReadOnlyUx && (
+            <button
+              type="button"
+              className="top-bar-btn"
+              onClick={() => {
+                if (canAddPhotoForCurrentView) setModalOpen(true);
+              }}
+              title={
+                !canAddPhotoForCurrentView
+                  ? PERSONAL_SERVER_DISABLED_WRITES_MESSAGE
+                  : undefined
+              }
+              disabled={!canAddPhotoForCurrentView}
+            >
+              + Добавить фото
+            </button>
+          )}
           {activeProfile && (
             <div
               className="top-bar-note"
@@ -2162,6 +2370,18 @@ function App() {
             >
               Профиль: {activeProfile.displayName || `@${activeProfile.slug}`}
             </div>
+          )}
+          {activeBrowserUser && (
+            <button
+              type="button"
+              className="top-bar-btn"
+              onClick={() => setUserSessionSettingsModalOpen(true)}
+            >
+              Настройки
+            </button>
+          )}
+          {activeProfile && canManageCurrentProfile && (
+            <div className="top-bar-note top-bar-note-success">Это ваш профиль</div>
           )}
           {isMissingProfileRoute && (
             <div className="top-bar-note">
@@ -2175,10 +2395,14 @@ function App() {
               Канонический профиль: `{canonicalProfilePath}`
             </div>
           )}
-          {hasRestrictedPersonalWrites && (
-            <div className="top-bar-note">
-              {PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
-            </div>
+          {publicServerReadOnlyUx ? (
+            <div className="top-bar-note">Личный слой: только просмотр.</div>
+          ) : (
+            hasRestrictedPersonalWrites && (
+              <div className="top-bar-note">
+                {PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
+              </div>
+            )
           )}
           <div className="scale">Масштаб: {scaleMeta[scale].label}</div>
         </div>
@@ -2217,6 +2441,24 @@ function App() {
           onImportDone={handleBackupImportDone}
           isReadOnly={!canImportBackupForCurrentView}
           readOnlyMessage={PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
+        />
+      )}
+
+      {userSessionSettingsModalOpen && activeBrowserUser && (
+        <UserSessionSettingsModal
+          onClose={() => setUserSessionSettingsModalOpen(false)}
+          onSignOut={handleBrowserActiveSignOut}
+          onForgetDevice={handleForgetThisDevice}
+        />
+      )}
+
+      {adminFunctionsModalOpen && canAccessAdminFunctions && (
+        <AdminFunctionsModal
+          isOpen={adminFunctionsModalOpen}
+          onClose={() => setAdminFunctionsModalOpen(false)}
+          profiles={adminProfiles}
+          isLoading={adminProfilesLoading}
+          errorMessage={adminProfilesError}
         />
       )}
 
@@ -2292,7 +2534,7 @@ function App() {
         />
       )}
 
-      {linkingMode && !overlayPhotoId && (
+      {linkingMode && !overlayPhotoId && !publicServerReadOnlyUx && (
         <div className="linking-mode-banner">
           <span>Режим связывания. Нажмите на другое фото на таймлайне.</span>
           <button
@@ -2430,6 +2672,7 @@ function App() {
               getActiveOffsets={getActiveOffsets}
               isDirty={isDirty}
               altHeld={altHeld}
+              showOffsetCommitControls={canEditOffsetsForCurrentView}
               onConfirmOffsets={handleConfirmOffsets}
               onCancelOffsets={handleCancelOffsets}
               onOverlayOpen={setOverlayPhotoId}

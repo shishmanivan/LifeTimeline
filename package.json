@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:owner": "vite --mode owner",
     "build": "tsc -b && vite build",
+    "build:owner": "tsc -b && vite build --mode owner",
     "preview": "vite preview",
     "personal:server": "tsx backend/personalReadonlyServer.ts",
     "personal:server:typecheck": "tsc -p backend/tsconfig.json --noEmit",

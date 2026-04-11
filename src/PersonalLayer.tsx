@@ -28,6 +28,8 @@ type PersonalLayerProps = {
   getActiveOffsets: (id: string) => Offsets;
   isDirty: (id: string) => boolean;
   altHeld: boolean;
+  /** When false, hide ✅/↺ commit UI (read-only / no offset writes). */
+  showOffsetCommitControls?: boolean;
   onConfirmOffsets: (id: string) => void;
   onCancelOffsets: (id: string) => void;
   onOverlayOpen: (id: string) => void;
@@ -48,6 +50,7 @@ export function PersonalLayer({
   getActiveOffsets,
   isDirty,
   altHeld,
+  showOffsetCommitControls = true,
   onConfirmOffsets,
   onCancelOffsets,
   onOverlayOpen,
@@ -88,7 +91,7 @@ export function PersonalLayer({
               onMouseEnter={() => onPhotoHover?.(photo.id)}
               onMouseLeave={() => onPhotoHover?.(null)}
             >
-              {inEditMode && dirty && (
+              {showOffsetCommitControls && inEditMode && dirty && (
                 <>
                   <button
                     type="button"

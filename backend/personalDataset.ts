@@ -180,6 +180,15 @@ function getManifestPath(dataDir: string): string {
   return path.join(dataDir, MANIFEST_FILENAME);
 }
 
+function buildEmptyPreparedManifest(): PreparedManifest {
+  return {
+    formatVersion: 1,
+    exportedAt: new Date().toISOString(),
+    series: [],
+    photos: [],
+  };
+}
+
 /** Base directory only; HTTP server should prefer `resolvePreparedPersonalDataDir` in `personalDatasetResolver`. */
 export function resolvePersonalDataDir(dir = process.env.PERSONAL_PHOTO_DATA_DIR): string {
   return dir ? path.resolve(dir) : DEFAULT_PERSONAL_DATA_DIR;
@@ -188,7 +197,14 @@ export function resolvePersonalDataDir(dir = process.env.PERSONAL_PHOTO_DATA_DIR
 export async function ensurePreparedPersonalDataset(
   dataDir: string
 ): Promise<void> {
-  await access(getManifestPath(dataDir));
+  const manifestPath = getManifestPath(dataDir);
+  try {
+    await access(manifestPath);
+  } catch {
+    await mkdir(path.join(dataDir, "images"), { recursive: true });
+    await mkdir(path.join(dataDir, "previews"), { recursive: true });
+    await writePreparedManifest(dataDir, buildEmptyPreparedManifest());
+  }
 }
 
 async function readPreparedManifest(dataDir: string): Promise<PreparedManifest> {
@@ -210,6 +226,25 @@ async function readPreparedManifest(dataDir: string): Promise<PreparedManifest> 
     ...manifest,
     photos: manifest.photos.map((photo) => normalizePreparedPhotoEntry(photo)),
   };
+}
+
+export async function readPreparedPhotoProfileId(
+  dataDir: string,
+  photoId: string
+): Promise<string | null> {
+  const manifest = await readPreparedManifest(dataDir);
+  const photo = manifest.photos.find((item) => item.id === photoId);
+  return photo?.profileId ?? null;
+}
+
+export async function readPreparedPhotoProfileIdsInDay(
+  dataDir: string,
+  date: string
+): Promise<string[]> {
+  const manifest = await readPreparedManifest(dataDir);
+  return manifest.photos
+    .filter((photo) => photo.date === date)
+    .map((photo) => photo.profileId);
 }
 
 async function writePreparedManifest(

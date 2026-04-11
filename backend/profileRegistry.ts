@@ -1,17 +1,28 @@
+import type { ProfileModel } from "../src/profileModel";
+
 /**
- * Explicit file-backed profile catalog (MVP: one row). Add entries here when
- * supporting more profiles; lookup stays in `profiles.ts`.
+ * Seed profile catalog used to bootstrap the runtime identity store.
+ * Existing runtime data keeps winning once persisted to disk.
  */
-export type Profile = {
-  id: string;
-  slug: string;
-  displayName: string;
-};
+export type Profile = ProfileModel;
 
 export const PROFILE_REGISTRY: readonly Profile[] = [
   {
     id: "1",
     slug: "ivan",
     displayName: "Ivan",
+    availability: "public",
+    personalDataset: {
+      profileId: "1",
+    },
+  },
+  {
+    id: "2",
+    slug: "anna",
+    displayName: "Anna",
+    availability: "public",
+    personalDataset: {
+      profileId: "2",
+    },
   },
 ];

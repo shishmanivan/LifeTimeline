@@ -5,6 +5,14 @@ import type {
   PhotoRecord,
   SeriesRecord,
 } from "./personalPhotoStorage";
+import type { ProfileModel } from "./profileModel";
+import type {
+  RequestRecoveryCodeInput,
+  RequestRecoveryCodeResult,
+  RegisterUserInput,
+  RegisterUserResult,
+  VerifyRecoveryCodeInput,
+} from "./userModel";
 import { getRouteProfileSlug } from "./profileRouteState";
 
 type FetchLike = typeof fetch;
@@ -57,10 +65,9 @@ export type ServerPersonalPhotoDto = ServerPhotoFields & {
 };
 
 export type ServerSeriesDto = SeriesRecord;
-export type ServerProfileDto = {
-  id: string;
-  slug: string;
-  displayName: string;
+export type ServerProfileDto = ProfileModel;
+export type ListAdminProfilesResponse = {
+  profiles: ServerProfileDto[];
 };
 
 export type ListServerPersonalPhotosResponse = {
@@ -166,6 +173,77 @@ export async function loadProfileForCurrentRoute(
   }
 
   return (await response.json()) as ServerProfileDto;
+}
+
+export async function loadAdminProfiles(
+  options: Pick<
+    ServerPersonalPhotoStorageOptions,
+    "baseUrl" | "fetchImpl" | "writeToken"
+  > = {}
+): Promise<ServerProfileDto[]> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const response = await fetchJson<ListAdminProfilesResponse>(
+    fetchImpl,
+    joinApiUrl(options.baseUrl, "", "/api/admin/profiles"),
+    {
+      headers: getWriteAuthHeaders(options.writeToken),
+    }
+  );
+  return response.profiles;
+}
+
+export async function registerUserViaServer(
+  input: RegisterUserInput,
+  options: Pick<ServerPersonalPhotoStorageOptions, "baseUrl" | "fetchImpl"> = {}
+): Promise<RegisterUserResult> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  return await fetchJson<RegisterUserResult>(
+    fetchImpl,
+    joinApiUrl(options.baseUrl, "", "/api/register"),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function requestRecoveryCodeViaServer(
+  input: RequestRecoveryCodeInput,
+  options: Pick<ServerPersonalPhotoStorageOptions, "baseUrl" | "fetchImpl"> = {}
+): Promise<RequestRecoveryCodeResult> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  return await fetchJson<RequestRecoveryCodeResult>(
+    fetchImpl,
+    joinApiUrl(options.baseUrl, "", "/api/recover-access/request-code"),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function verifyRecoveryCodeViaServer(
+  input: VerifyRecoveryCodeInput,
+  options: Pick<ServerPersonalPhotoStorageOptions, "baseUrl" | "fetchImpl"> = {}
+): Promise<RegisterUserResult> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  return await fetchJson<RegisterUserResult>(
+    fetchImpl,
+    joinApiUrl(options.baseUrl, "", "/api/recover-access/verify-code"),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    }
+  );
 }
 
 function getPhotosListUrl(

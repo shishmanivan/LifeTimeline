@@ -22,14 +22,80 @@ export type PersonalWriteOwnershipResult =
   | { allowed: true }
   | { allowed: false; statusCode: number; message: string };
 
+type PersonalWriteTarget =
+  | {
+      targetProfileId?: string | null;
+      actorProfileId?: string | null;
+      actorKind?: "admin" | "user";
+    }
+  | undefined;
+
+function allowActorProfileOnly(target: PersonalWriteTarget): PersonalWriteOwnershipResult {
+  const actorProfileId = target?.actorProfileId ?? null;
+  const targetProfileId = target?.targetProfileId ?? actorProfileId;
+  if (
+    actorProfileId !== null &&
+    targetProfileId !== null &&
+    actorProfileId === targetProfileId
+  ) {
+    return { allowed: true };
+  }
+  return {
+    allowed: false,
+    statusCode: 403,
+    message: "Write access is limited to the current user's profile.",
+  };
+}
+
 /**
- * MVP: always allows — implicit seeded owner matches current open personal writes.
- * Real auth: resolve actor, load target profile scope, then allow or deny here.
+ * MVP: token-gated writes are restricted to the actor's own profile.
+ * Admin token still exists, but only acts as the seeded owner profile actor.
+ * Real auth: resolve actor + target resources and replace this with real authorization.
  */
 export function evaluatePersonalWriteOwnership(
-  ctx: PersonalWriteOperation
+  ctx: PersonalWriteOperation,
+  options?: {
+    targetProfileId?: string | null;
+    actorProfileId?: string | null;
+    actorKind?: "admin" | "user";
+  }
 ): PersonalWriteOwnershipResult {
-  void ctx;
   void getMvpSeededBackendCurrentUser();
-  return { allowed: true };
+
+  switch (ctx.operation) {
+    case "upsert-photo":
+      return allowActorProfileOnly({
+        targetProfileId: ctx.profileId ?? options?.targetProfileId,
+        actorProfileId: options?.actorProfileId,
+        actorKind: options?.actorKind,
+      });
+    case "delete-photo":
+    case "replace-photo-image":
+    case "patch-photo-metadata":
+      return allowActorProfileOnly(options);
+    case "patch-photo-series":
+      return options?.actorKind === "admin"
+        ? allowActorProfileOnly(options)
+        : {
+            allowed: false,
+            statusCode: 403,
+            message: "Series editing is not available in user MVP mode.",
+          };
+    case "delete-photos-by-date":
+      return allowActorProfileOnly(options);
+    case "upsert-series":
+      return options?.actorKind === "admin"
+        ? allowActorProfileOnly(options)
+        : {
+            allowed: false,
+            statusCode: 403,
+            message: "Series editing is not available in user MVP mode.",
+          };
+    default:
+      return {
+        allowed: false,
+        statusCode: 403,
+        message: "Unsupported personal write operation.",
+      };
+  }
 }

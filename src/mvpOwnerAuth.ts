@@ -1,3 +1,5 @@
+import { getProfileDatasetProfileId, type ProfileModel } from "./profileModel";
+
 /**
  * MVP seeded owner — dev placeholder until real auth replaces it.
  * Not a login flow; single implicit owner tied to profile id "1".
@@ -30,10 +32,14 @@ export function getMvpOwnerCanonicalProfilePath(): string | null {
 export function computeIsOwnerViewingCurrentProfile(
   currentUserProfileId: string | null,
   isRootShortcut: boolean,
-  activeProfile: { id: string } | null | undefined
+  activeProfile: Pick<ProfileModel, "personalDataset"> | null | undefined
 ): boolean {
   return (
     currentUserProfileId !== null &&
-    (isRootShortcut || activeProfile?.id === currentUserProfileId)
+    (
+      isRootShortcut ||
+      (activeProfile != null &&
+        getProfileDatasetProfileId(activeProfile) === currentUserProfileId)
+    )
   );
 }
