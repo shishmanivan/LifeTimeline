@@ -1,6 +1,7 @@
 import path from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { ProfileModel } from "../src/profileModel";
+import { getProfileDatasetProfileId } from "../src/profileModel";
 import { normalizeUserRole, type UserModel } from "../src/userModel";
 import { PROFILE_REGISTRY } from "./profileRegistry";
 
@@ -43,7 +44,9 @@ function cloneProfile(profile: ProfileModel): ProfileModel {
 
 /**
  * Legacy profiles may omit `ownerUserId` on disk; fill from `user.primaryProfileId`
- * when unambiguous. Skips profiles that already have a non-empty owner.
+ * when unambiguous. Prefer the explicit profile id match, but also accept the
+ * prepared-dataset profile id for older records that stored that binding
+ * instead. Skips profiles that already have a non-empty owner.
  */
 function assignInferredProfileOwners(
   profiles: ProfileModel[],
@@ -53,7 +56,12 @@ function assignInferredProfileOwners(
     if (profile.ownerUserId.trim() !== "") {
       return profile;
     }
-    const ownerId = users.find((u) => u.primaryProfileId === profile.id)?.id;
+    const datasetProfileId = getProfileDatasetProfileId(profile);
+    const ownerId = users.find(
+      (u) =>
+        u.primaryProfileId === profile.id ||
+        u.primaryProfileId === datasetProfileId
+    )?.id;
     if (ownerId) {
       return { ...profile, ownerUserId: ownerId };
     }
