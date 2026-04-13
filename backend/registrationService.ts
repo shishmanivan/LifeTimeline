@@ -55,10 +55,12 @@ function makeUniqueSlug(baseSlug: string, takenSlugs: Set<string>): string {
 function createRegisteredProfile(
   profileId: string,
   displayName: string,
-  slug: string
+  slug: string,
+  ownerUserId: string
 ): ProfileModel {
   return {
     id: profileId,
+    ownerUserId,
     slug,
     displayName,
     availability: "public",
@@ -78,6 +80,7 @@ function createRegisteredUser(
     email,
     status: "active",
     createdAt: new Date().toISOString(),
+    role: "user",
     primaryProfileId,
   };
 }
@@ -123,7 +126,7 @@ export async function registerUser(
     const userId = `user-${randomUUID()}`;
     const mvpWriteAccessToken = `mvp-write-${randomUUID()}`;
 
-    const profile = createRegisteredProfile(profileId, displayName, slug);
+    const profile = createRegisteredProfile(profileId, displayName, slug, userId);
     const user = createRegisteredUser(userId, email, profile.id);
 
     store.profiles.push(profile);

@@ -5,6 +5,7 @@ export type PersonalPhoto = {
   title: string;
   date: string;
   image: string;
+  profileId?: string;
   offsetXDays: number;
   offsetY: number;
   laneIndex?: number;

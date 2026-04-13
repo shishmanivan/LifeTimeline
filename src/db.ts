@@ -10,6 +10,7 @@ const SERIES_STORE = "photoSeries";
 export type SeriesRecord = {
   id: string;
   title: string;
+  profileId: string;
 };
 
 export type PhotoRecord = {
@@ -43,6 +44,32 @@ function normalizePhotoRecord<T extends PhotoRecord | null>(record: T): T {
     ...record,
     profileId: DEFAULT_PROFILE_ID,
   } as T;
+}
+
+function inferSeriesProfileId(
+  seriesId: string,
+  photos: readonly PhotoRecord[]
+): string | null {
+  const linkedProfileIds = photos
+    .filter((photo) => photo.seriesId === seriesId)
+    .map((photo) => photo.profileId ?? DEFAULT_PROFILE_ID);
+  const uniqueProfileIds = [...new Set(linkedProfileIds)];
+  return uniqueProfileIds.length === 1 ? uniqueProfileIds[0]! : null;
+}
+
+function normalizeSeriesRecord(
+  series:
+    | SeriesRecord
+    | (Omit<SeriesRecord, "profileId"> & { profileId?: string }),
+  photos: readonly PhotoRecord[] = []
+): SeriesRecord {
+  return {
+    ...series,
+    profileId:
+      (typeof series.profileId === "string" && series.profileId.trim()) ||
+      inferSeriesProfileId(series.id, photos) ||
+      DEFAULT_PROFILE_ID,
+  };
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -240,7 +267,7 @@ export async function saveSeries(series: SeriesRecord): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(SERIES_STORE, "readwrite");
     const store = tx.objectStore(SERIES_STORE);
-    const request = store.put(series);
+    const request = store.put(normalizeSeriesRecord(series));
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();
     tx.oncomplete = () => db.close();
@@ -250,24 +277,52 @@ export async function saveSeries(series: SeriesRecord): Promise<void> {
 export async function getAllSeries(): Promise<SeriesRecord[]> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(SERIES_STORE, "readonly");
-    const store = tx.objectStore(SERIES_STORE);
-    const request = store.getAll();
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result || []);
-    tx.oncomplete = () => db.close();
+    const tx = db.transaction([SERIES_STORE, STORE_NAME], "readonly");
+    const seriesStore = tx.objectStore(SERIES_STORE);
+    const photoStore = tx.objectStore(STORE_NAME);
+    const seriesRequest = seriesStore.getAll();
+    const photoRequest = photoStore.getAll();
+    seriesRequest.onerror = () => reject(seriesRequest.error);
+    photoRequest.onerror = () => reject(photoRequest.error);
+    tx.oncomplete = () => {
+      const photos = ((photoRequest.result || []) as PhotoRecord[]).map((photo) =>
+        normalizePhotoRecord(photo)
+      );
+      const series = (seriesRequest.result || []) as Array<
+        SeriesRecord | (Omit<SeriesRecord, "profileId"> & { profileId?: string })
+      >;
+      resolve(series.map((item) => normalizeSeriesRecord(item, photos)));
+      db.close();
+    };
   });
 }
 
 export async function getSeries(id: string): Promise<SeriesRecord | null> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(SERIES_STORE, "readonly");
-    const store = tx.objectStore(SERIES_STORE);
-    const request = store.get(id);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result ?? null);
-    tx.oncomplete = () => db.close();
+    const tx = db.transaction([SERIES_STORE, STORE_NAME], "readonly");
+    const seriesStore = tx.objectStore(SERIES_STORE);
+    const photoStore = tx.objectStore(STORE_NAME);
+    const seriesRequest = seriesStore.get(id);
+    const photoRequest = photoStore.getAll();
+    seriesRequest.onerror = () => reject(seriesRequest.error);
+    photoRequest.onerror = () => reject(photoRequest.error);
+    tx.oncomplete = () => {
+      const rawSeries = seriesRequest.result as
+        | SeriesRecord
+        | (Omit<SeriesRecord, "profileId"> & { profileId?: string })
+        | undefined;
+      if (!rawSeries) {
+        resolve(null);
+        db.close();
+        return;
+      }
+      const photos = ((photoRequest.result || []) as PhotoRecord[]).map((photo) =>
+        normalizePhotoRecord(photo)
+      );
+      resolve(normalizeSeriesRecord(rawSeries, photos));
+      db.close();
+    };
   });
 }
 

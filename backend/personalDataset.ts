@@ -1,6 +1,5 @@
 import path from "node:path";
 import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { MVP_BACKEND_OWNER_DEFAULT_PROFILE_ID } from "./mvpOwnerContext";
 import type {
   ListServerPersonalPhotosResponse,
   ListServerSeriesResponse,
@@ -10,6 +9,11 @@ import type {
 type PreparedSeriesRecord = {
   id: string;
   title: string;
+  profileId: string;
+};
+
+type PreparedSeriesInput = Omit<PreparedSeriesRecord, "profileId"> & {
+  profileId?: string;
 };
 
 type PreparedPhotoEntry = {
@@ -44,7 +48,7 @@ export type PreparedUploadedAsset = {
 type PreparedManifest = {
   formatVersion: number;
   exportedAt: string;
-  series: PreparedSeriesRecord[];
+  series: PreparedSeriesInput[];
   photos: PreparedPhotoEntry[];
 };
 
@@ -85,7 +89,7 @@ export const DEFAULT_PERSONAL_DATA_DIR = path.resolve(
 );
 
 const MANIFEST_FILENAME = "manifest.json";
-const DEFAULT_PROFILE_ID = MVP_BACKEND_OWNER_DEFAULT_PROFILE_ID;
+const DEFAULT_PROFILE_ID = "";
 const MIME_TYPE_EXTENSIONS: Record<string, string> = {
   "image/jpeg": ".jpg",
   "image/png": ".png",
@@ -176,6 +180,31 @@ function normalizePreparedPhotoEntry(
   };
 }
 
+function inferPreparedSeriesProfileId(
+  seriesId: string,
+  photos: readonly PreparedPhotoEntry[]
+): string | null {
+  const linkedProfileIds = photos
+    .filter((photo) => photo.seriesId === seriesId)
+    .map((photo) => photo.profileId ?? DEFAULT_PROFILE_ID);
+  const uniqueProfileIds = [...new Set(linkedProfileIds)];
+  return uniqueProfileIds.length === 1 ? uniqueProfileIds[0]! : null;
+}
+
+function normalizePreparedSeriesRecord(
+  series: PreparedSeriesInput,
+  photos: readonly PreparedPhotoEntry[]
+): PreparedSeriesRecord {
+  const normalizedProfileId =
+    (typeof series.profileId === "string" && series.profileId.trim()) ||
+    inferPreparedSeriesProfileId(series.id, photos) ||
+    DEFAULT_PROFILE_ID;
+  return {
+    ...series,
+    profileId: normalizedProfileId,
+  };
+}
+
 function getManifestPath(dataDir: string): string {
   return path.join(dataDir, MANIFEST_FILENAME);
 }
@@ -222,9 +251,14 @@ async function readPreparedManifest(dataDir: string): Promise<PreparedManifest> 
     );
   }
 
+  const photos = manifest.photos.map((photo) => normalizePreparedPhotoEntry(photo));
+
   return {
     ...manifest,
-    photos: manifest.photos.map((photo) => normalizePreparedPhotoEntry(photo)),
+    photos,
+    series: manifest.series.map((series) =>
+      normalizePreparedSeriesRecord(series, photos)
+    ),
   };
 }
 
@@ -245,6 +279,15 @@ export async function readPreparedPhotoProfileIdsInDay(
   return manifest.photos
     .filter((photo) => photo.date === date)
     .map((photo) => photo.profileId);
+}
+
+export async function readPreparedSeries(
+  dataDir: string,
+  seriesId: string
+): Promise<PreparedSeriesRecord | null> {
+  const manifest = await readPreparedManifest(dataDir);
+  const series = manifest.series.find((item) => item.id === seriesId);
+  return series ? normalizePreparedSeriesRecord(series, manifest.photos) : null;
 }
 
 async function writePreparedManifest(
@@ -273,7 +316,9 @@ export async function readPreparedPersonalDataset(
       photos: manifest.photos.map((photo) => toPhotoDto(photo, publicBaseUrl)),
     },
     seriesResponse: {
-      series: manifest.series,
+      series: manifest.series.map((series) =>
+        normalizePreparedSeriesRecord(series, manifest.photos)
+      ),
     },
   };
 }
@@ -300,15 +345,19 @@ export async function updatePreparedPhotoMetadata(
 
 export async function savePreparedSeries(
   dataDir: string,
-  series: PreparedSeriesRecord
+  series: PreparedSeriesInput
 ): Promise<void> {
   const manifest = await readPreparedManifest(dataDir);
   const index = manifest.series.findIndex((item) => item.id === series.id);
+  const nextSeries = normalizePreparedSeriesRecord(
+    index === -1 ? series : { ...manifest.series[index], ...series },
+    manifest.photos
+  );
 
   if (index === -1) {
-    manifest.series.push(series);
+    manifest.series.push(nextSeries);
   } else {
-    manifest.series[index] = series;
+    manifest.series[index] = nextSeries;
   }
 
   await writePreparedManifest(dataDir, manifest);

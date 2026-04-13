@@ -7,10 +7,12 @@ import type {
 } from "./personalPhotoStorage";
 import type { ProfileModel } from "./profileModel";
 import type {
+  CurrentAuthenticatedUserResult,
   RequestRecoveryCodeInput,
   RequestRecoveryCodeResult,
   RegisterUserInput,
   RegisterUserResult,
+  UserModel,
   VerifyRecoveryCodeInput,
 } from "./userModel";
 import { getRouteProfileSlug } from "./profileRouteState";
@@ -69,6 +71,8 @@ export type ServerProfileDto = ProfileModel;
 export type ListAdminProfilesResponse = {
   profiles: ServerProfileDto[];
 };
+
+export type GetCurrentAuthenticatedUserResponse = CurrentAuthenticatedUserResult;
 
 export type ListServerPersonalPhotosResponse = {
   photos: ServerPersonalPhotoDto[];
@@ -190,6 +194,23 @@ export async function loadAdminProfiles(
     }
   );
   return response.profiles;
+}
+
+export async function loadCurrentAuthenticatedUser(
+  options: Pick<
+    ServerPersonalPhotoStorageOptions,
+    "baseUrl" | "fetchImpl" | "writeToken"
+  > = {}
+): Promise<UserModel | null> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const response = await fetchJson<GetCurrentAuthenticatedUserResponse>(
+    fetchImpl,
+    joinApiUrl(options.baseUrl, "", "/api/me"),
+    {
+      headers: getWriteAuthHeaders(options.writeToken),
+    }
+  );
+  return response.user;
 }
 
 export async function registerUserViaServer(

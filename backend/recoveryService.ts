@@ -1,9 +1,10 @@
 import { randomInt, randomUUID } from "node:crypto";
-import type {
-  RequestRecoveryCodeInput,
-  RequestRecoveryCodeResult,
-  RegisterUserResult,
-  VerifyRecoveryCodeInput,
+import {
+  normalizeUserRole,
+  type RequestRecoveryCodeInput,
+  type RequestRecoveryCodeResult,
+  type RegisterUserResult,
+  type VerifyRecoveryCodeInput,
 } from "../src/userModel";
 import { updateIdentityStore } from "./identityStore";
 
@@ -166,6 +167,7 @@ export async function verifyRecoveryCode(
         email: user.email,
         status: user.status,
         createdAt: user.createdAt,
+        role: normalizeUserRole(user.role),
         primaryProfileId: user.primaryProfileId,
       },
       profile,

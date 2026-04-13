@@ -15,6 +15,7 @@ import {
   readPreparedPhotoProfileId,
   readPreparedPhotoProfileIdsInDay,
   readPreparedPersonalDataset,
+  readPreparedSeries,
   replacePreparedPhotoImage,
   resolveAssetFilePath,
   savePreparedPhoto,
@@ -31,8 +32,7 @@ import {
   resolvePreparedPersonalDataDir,
   type PreparedPersonalDatasetScope,
 } from "./personalDatasetResolver";
-import { ensureIdentityStore } from "./identityStore";
-import { evaluatePersonalWriteOwnership } from "./personalWriteOwnershipGuard";
+import { ensureIdentityStore, readIdentityStore } from "./identityStore";
 import {
   registerUser,
   RegistrationError,
@@ -42,25 +42,23 @@ import {
   verifyRecoveryCode,
   RecoveryError,
 } from "./recoveryService";
+import type { ProfileModel } from "../src/profileModel";
+import { getProfileDatasetProfileId } from "../src/profileModel";
 import type {
+  CurrentAuthenticatedUserResult,
   RecoverAccessInput,
   RegisterUserInput,
   RequestRecoveryCodeInput,
   VerifyRecoveryCodeInput,
 } from "../src/userModel";
-import { getUserByMvpWriteAccessToken } from "./userRegistry";
-import { getMvpBackendCurrentUserProfileId } from "./mvpOwnerContext";
+import { getAuthenticatedUserFromRequest } from "./auth/getAuthenticatedUser";
+import { mayUserAdmin, mayUserWriteProfile } from "./auth/mayUserWriteProfile";
 
 type PersonalReadonlyServerConfig = {
   host: string;
   port: number;
   publicBaseUrl?: string;
-  writeToken?: string;
 };
-
-type ResolvedWriteActor =
-  | { kind: "admin"; profileId: string }
-  | { kind: "user"; profileId: string; userId: string };
 
 function personalPreparedDatasetDir(
   scope?: PreparedPersonalDatasetScope
@@ -70,7 +68,6 @@ function personalPreparedDatasetDir(
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
-const PERSONAL_WRITE_TOKEN_HEADER = "x-personal-write-token";
 
 function getConfig(): PersonalReadonlyServerConfig {
   const rawPort = process.env.PERSONAL_PHOTO_SERVER_PORT;
@@ -80,7 +77,6 @@ function getConfig(): PersonalReadonlyServerConfig {
     host: process.env.PERSONAL_PHOTO_SERVER_HOST || DEFAULT_HOST,
     port: Number.isFinite(parsedPort) ? parsedPort : DEFAULT_PORT,
     publicBaseUrl: process.env.PERSONAL_PHOTO_PUBLIC_BASE_URL,
-    writeToken: process.env.PERSONAL_WRITE_TOKEN?.trim() || undefined,
   };
 }
 
@@ -122,59 +118,21 @@ function isWriteMethod(method: string | undefined): boolean {
   return method === "PUT" || method === "PATCH" || method === "DELETE";
 }
 
-function hasValidWriteToken(
-  req: IncomingMessage,
-  configuredToken: string | undefined
-): boolean {
-  if (!configuredToken) return false;
-  const header = req.headers[PERSONAL_WRITE_TOKEN_HEADER];
-  const requestToken = Array.isArray(header) ? header[0] : header;
-  return typeof requestToken === "string" && requestToken === configuredToken;
-}
-
-function getRequestWriteToken(req: IncomingMessage): string | undefined {
-  const header = req.headers[PERSONAL_WRITE_TOKEN_HEADER];
-  const requestToken = Array.isArray(header) ? header[0] : header;
-  return typeof requestToken === "string" ? requestToken : undefined;
-}
-
-async function resolveWriteActor(
-  req: IncomingMessage,
-  configuredAdminToken: string | undefined
-): Promise<ResolvedWriteActor | null> {
-  const requestToken = getRequestWriteToken(req);
-  if (!requestToken) return null;
-
-  if (configuredAdminToken && requestToken === configuredAdminToken) {
-    return {
-      kind: "admin",
-      profileId: getMvpBackendCurrentUserProfileId(),
-    };
-  }
-
-  const user = await getUserByMvpWriteAccessToken(requestToken);
-  if (!user || !user.primaryProfileId) {
+async function resolveProfileByAnyProfileId(
+  profileId: string | null | undefined
+): Promise<ProfileModel | null> {
+  if (!profileId) {
     return null;
   }
 
-  return {
-    kind: "user",
-    userId: user.id,
-    profileId: user.primaryProfileId,
-  };
-}
-
-function ensureAdminAccess(
-  req: IncomingMessage,
-  res: ServerResponse,
-  configuredAdminToken: string | undefined
-): boolean {
-  if (hasValidWriteToken(req, configuredAdminToken)) {
-    return true;
-  }
-
-  sendText(res, 403, "Missing or invalid personal write token.");
-  return false;
+  const store = await readIdentityStore();
+  return (
+    store.profiles.find(
+      (profile) =>
+        profile.id === profileId ||
+        getProfileDatasetProfileId(profile) === profileId
+    ) ?? null
+  );
 }
 
 function getMimeType(filePath: string): string {
@@ -309,7 +267,7 @@ function parsePhotoMetadataPatch(body: unknown): PreparedPhotoMetadataPatch {
 function parseSeriesRecord(
   body: unknown,
   pathSeriesId: string
-): { id: string; title: string } {
+): { id: string; title: string; profileId?: string } {
   if (!isRecord(body)) {
     throw new Error("Series body must be a JSON object.");
   }
@@ -329,9 +287,14 @@ function parseSeriesRecord(
     throw new Error('Field "title" cannot be empty.');
   }
 
+  if ("profileId" in body && typeof body.profileId !== "string") {
+    throw new Error('Field "profileId" must be a string when provided.');
+  }
+
   return {
     id: body.id,
     title,
+    profileId: typeof body.profileId === "string" ? body.profileId : undefined,
   };
 }
 
@@ -722,18 +685,29 @@ async function handleRequest(
     return;
   }
 
+  const authUser = await getAuthenticatedUserFromRequest(req);
+
   const requestUrl = new URL(
     req.url || "/",
     `http://${req.headers.host || `${config.host}:${config.port}`}`
   );
   const pathname = requestUrl.pathname;
-  const writeActor = isWriteMethod(req.method)
-    ? await resolveWriteActor(req, config.writeToken)
-    : null;
 
-  if (isWriteMethod(req.method) && !writeActor) {
-    sendText(res, 403, "Missing or invalid personal write token.");
-    return;
+  if (isWriteMethod(req.method)) {
+    console.log(
+      `[auth-debug] write ${req.method} ${pathname} auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"}`
+    );
+  }
+
+  if (isWriteMethod(req.method)) {
+    const granted = authUser !== null;
+    console.log(
+      `[auth-debug] global-write-gate method=${req.method} pathname=${pathname} auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"} granted=${granted}`
+    );
+    if (!granted) {
+      sendText(res, 403, "Missing or invalid personal write token.");
+      return;
+    }
   }
 
   if (req.method === "POST" && pathname === "/api/register") {
@@ -799,8 +773,21 @@ async function handleRequest(
     }
   }
 
+  if (req.method === "GET" && pathname === "/api/me") {
+    const response: CurrentAuthenticatedUserResult = {
+      user: authUser,
+    };
+    sendJson(res, 200, response);
+    return;
+  }
+
   if (req.method === "GET" && pathname === "/api/admin/profiles") {
-    if (!ensureAdminAccess(req, res, config.writeToken)) {
+    const granted = mayUserAdmin(authUser);
+    console.log(
+      `[auth-debug] GET /api/admin/profiles authPresent=${authUser != null} auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"} granted=${granted}`
+    );
+    if (!granted) {
+      sendText(res, 403, "Admin access required.");
       return;
     }
 
@@ -822,31 +809,32 @@ async function handleRequest(
       personalPreparedDatasetDir(),
       date
     );
-    const targetProfileId =
-      profileIdsInDay.length > 0
-        ? profileIdsInDay.every((profileId) => profileId === profileIdsInDay[0])
-          ? profileIdsInDay[0]
-          : null
-        : undefined;
-    if (targetProfileId === null) {
+    const targetedProfileIds = [...new Set(profileIdsInDay)];
+    const isAdmin = mayUserAdmin(authUser);
+    let targetProfile: ProfileModel | null = null;
+    let granted = false;
+
+    if (isAdmin) {
+      granted = true;
+    } else if (targetedProfileIds.length === 0) {
+      granted = authUser !== null;
+    } else if (targetedProfileIds.length === 1) {
+      targetProfile = await resolveProfileByAnyProfileId(targetedProfileIds[0]);
+      granted = mayUserWriteProfile(authUser, targetProfile);
+    }
+
+    console.log(
+      `[auth-debug] route=delete-photos-by-date auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"} targetProfileIds=${JSON.stringify(targetedProfileIds)} granted=${granted}`
+    );
+
+    if (!granted) {
       sendText(
         res,
         403,
-        "Deleting photos across multiple profiles is not allowed."
+        targetedProfileIds.length > 1
+          ? "Deleting photos across multiple profiles is not allowed."
+          : "Write access is limited to the current user's profile."
       );
-      return;
-    }
-
-    const byDateOwnership = evaluatePersonalWriteOwnership({
-      operation: "delete-photos-by-date",
-      date,
-    }, {
-      actorProfileId: writeActor?.profileId,
-      actorKind: writeActor?.kind,
-      targetProfileId,
-    });
-    if (!byDateOwnership.allowed) {
-      sendText(res, byDateOwnership.statusCode, byDateOwnership.message);
       return;
     }
 
@@ -859,19 +847,18 @@ async function handleRequest(
   if (req.method === "PUT" && photoSaveMatch) {
     const photoId = decodeURIComponent(photoSaveMatch[1]);
     const payload = await parsePhotoSaveRequest(req, photoId);
-    if (!payload.metadata.profileId && writeActor?.kind === "user") {
-      payload.metadata.profileId = writeActor.profileId;
+    if (!payload.metadata.profileId && authUser?.primaryProfileId) {
+      payload.metadata.profileId = authUser.primaryProfileId;
     }
-    const saveOwnership = evaluatePersonalWriteOwnership({
-      operation: "upsert-photo",
-      photoId,
-      profileId: payload.metadata.profileId,
-    }, {
-      actorProfileId: writeActor?.profileId,
-      actorKind: writeActor?.kind,
-    });
-    if (!saveOwnership.allowed) {
-      sendText(res, saveOwnership.statusCode, saveOwnership.message);
+    const targetProfile = await resolveProfileByAnyProfileId(
+      payload.metadata.profileId
+    );
+    const granted = mayUserWriteProfile(authUser, targetProfile);
+    console.log(
+      `[auth-debug] route=upsert-photo auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"} targetProfileId=${targetProfile?.id ?? payload.metadata.profileId ?? "n/a"} granted=${granted}`
+    );
+    if (!granted) {
+      sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
     await savePreparedPhoto(personalPreparedDatasetDir(), payload);
@@ -897,16 +884,13 @@ async function handleRequest(
       personalPreparedDatasetDir(),
       photoId
     );
-    const deleteOwnership = evaluatePersonalWriteOwnership({
-      operation: "delete-photo",
-      photoId,
-    }, {
-      actorProfileId: writeActor?.profileId,
-      actorKind: writeActor?.kind,
-      targetProfileId,
-    });
-    if (!deleteOwnership.allowed) {
-      sendText(res, deleteOwnership.statusCode, deleteOwnership.message);
+    const targetProfile = await resolveProfileByAnyProfileId(targetProfileId);
+    const granted = mayUserWriteProfile(authUser, targetProfile);
+    console.log(
+      `[auth-debug] route=delete-photo auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"} targetProfileId=${targetProfile?.id ?? targetProfileId ?? "n/a"} granted=${granted}`
+    );
+    if (!granted) {
+      sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
     const deleted = await deletePreparedPhoto(personalPreparedDatasetDir(), photoId);
@@ -927,16 +911,13 @@ async function handleRequest(
       personalPreparedDatasetDir(),
       photoId
     );
-    const imageOwnership = evaluatePersonalWriteOwnership({
-      operation: "replace-photo-image",
-      photoId,
-    }, {
-      actorProfileId: writeActor?.profileId,
-      actorKind: writeActor?.kind,
-      targetProfileId,
-    });
-    if (!imageOwnership.allowed) {
-      sendText(res, imageOwnership.statusCode, imageOwnership.message);
+    const targetProfile = await resolveProfileByAnyProfileId(targetProfileId);
+    const granted = mayUserWriteProfile(authUser, targetProfile);
+    console.log(
+      `[auth-debug] route=replace-photo-image auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"} targetProfileId=${targetProfile?.id ?? targetProfileId ?? "n/a"} granted=${granted}`
+    );
+    if (!granted) {
+      sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
     const updated = await replacePreparedPhotoImage(personalPreparedDatasetDir(), photoId, payload);
@@ -969,16 +950,13 @@ async function handleRequest(
       personalPreparedDatasetDir(),
       photoId
     );
-    const metadataOwnership = evaluatePersonalWriteOwnership({
-      operation: "patch-photo-metadata",
-      photoId,
-    }, {
-      actorProfileId: writeActor?.profileId,
-      actorKind: writeActor?.kind,
-      targetProfileId,
-    });
-    if (!metadataOwnership.allowed) {
-      sendText(res, metadataOwnership.statusCode, metadataOwnership.message);
+    const targetProfile = await resolveProfileByAnyProfileId(targetProfileId);
+    const granted = mayUserWriteProfile(authUser, targetProfile);
+    console.log(
+      `[auth-debug] route=patch-photo-metadata auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"} targetProfileId=${targetProfile?.id ?? targetProfileId ?? "n/a"} granted=${granted}`
+    );
+    if (!granted) {
+      sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
     const updated = await updatePreparedPhotoMetadata(personalPreparedDatasetDir(), photoId, patch);
@@ -1011,16 +989,13 @@ async function handleRequest(
       personalPreparedDatasetDir(),
       photoId
     );
-    const photoSeriesOwnership = evaluatePersonalWriteOwnership({
-      operation: "patch-photo-series",
-      photoId,
-    }, {
-      actorProfileId: writeActor?.profileId,
-      actorKind: writeActor?.kind,
-      targetProfileId,
-    });
-    if (!photoSeriesOwnership.allowed) {
-      sendText(res, photoSeriesOwnership.statusCode, photoSeriesOwnership.message);
+    const targetProfile = await resolveProfileByAnyProfileId(targetProfileId);
+    const granted = mayUserWriteProfile(authUser, targetProfile);
+    console.log(
+      `[auth-debug] route=patch-photo-series auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"} targetProfileId=${targetProfile?.id ?? targetProfileId ?? "n/a"} granted=${granted}`
+    );
+    if (!granted) {
+      sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
     const result = await updatePreparedPhotoSeries(personalPreparedDatasetDir(), photoId, patch);
@@ -1052,19 +1027,27 @@ async function handleRequest(
   if (req.method === "PUT" && seriesMatch) {
     const seriesId = decodeURIComponent(seriesMatch[1]);
     const series = parseSeriesRecord(await readJsonBody(req), seriesId);
-    const seriesOwnership = evaluatePersonalWriteOwnership({
-      operation: "upsert-series",
-      seriesId,
-    }, {
-      actorProfileId: writeActor?.profileId,
-      actorKind: writeActor?.kind,
-    });
-    if (!seriesOwnership.allowed) {
-      sendText(res, seriesOwnership.statusCode, seriesOwnership.message);
+    const existingSeries = await readPreparedSeries(
+      personalPreparedDatasetDir(),
+      seriesId
+    );
+    const targetProfileId =
+      series.profileId ?? existingSeries?.profileId ?? authUser?.primaryProfileId;
+    const targetProfile = await resolveProfileByAnyProfileId(targetProfileId);
+    const granted = mayUserWriteProfile(authUser, targetProfile);
+    console.log(
+      `[auth-debug] route=upsert-series auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"} targetProfileId=${targetProfile?.id ?? targetProfileId ?? "n/a"} granted=${granted}`
+    );
+    if (!granted) {
+      sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
-    await savePreparedSeries(personalPreparedDatasetDir(), series);
-    sendJson(res, 200, { series });
+    const nextSeries = {
+      ...series,
+      profileId: targetProfile?.id ?? targetProfileId ?? "",
+    };
+    await savePreparedSeries(personalPreparedDatasetDir(), nextSeries);
+    sendJson(res, 200, { series: nextSeries });
     return;
   }
 
@@ -1172,7 +1155,7 @@ async function main(): Promise<void> {
     console.log(`[personal-backend] photos: ${publicBaseUrl}/api/personal/photos`);
     console.log(`[personal-backend] series: ${publicBaseUrl}/api/personal/series`);
     console.log(
-      `[personal-backend] write auth: ${config.writeToken ? "enabled" : "locked (PERSONAL_WRITE_TOKEN not set)"}`
+      "[personal-backend] mutating routes require X-Personal-Write-Token with a registered user token."
     );
   });
 }

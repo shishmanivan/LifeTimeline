@@ -24,7 +24,7 @@ type BackupPhotoEntry = {
 type BackupManifest = {
   formatVersion: number;
   exportedAt: string;
-  series: Array<{ id: string; title: string }>;
+  series: Array<{ id: string; title: string; profileId?: string }>;
   photos: BackupPhotoEntry[];
 };
 
@@ -32,7 +32,7 @@ type EmbeddedBackupFile = {
   formatVersion: number;
   exportedAt: string;
   embedded: true;
-  series: Array<{ id: string; title: string }>;
+  series: Array<{ id: string; title: string; profileId?: string }>;
   photos: Array<
     Omit<BackupPhotoEntry, "imageFile" | "previewFile"> & {
       imageMime: string;

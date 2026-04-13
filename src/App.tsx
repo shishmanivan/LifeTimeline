@@ -4,7 +4,8 @@ import {
 } from "./db";
 import {
   createSelectedPersonalPhotoStorage,
-  getPersonalPhotoCapabilities,
+  getPersonalPhotoCapabilitiesForAuthenticatedUser,
+  loadAuthenticatedCurrentUser,
   loadSelectedAdminProfiles,
   personalPhotoStorageIsServerMode,
 } from "./personalPhotoStorageSelector";
@@ -14,13 +15,8 @@ import {
   type ServerProfileDto,
 } from "./serverPersonalPhotoStorage";
 import { getProfileRouteState } from "./profileRouteState";
-import {
-  computeIsOwnerViewingCurrentProfile,
-  getMvpOwnerCanonicalProfilePath,
-  getMvpSeededCurrentUser,
-  type MvpCurrentUser,
-} from "./mvpOwnerAuth";
 import { getProfileDatasetProfileId } from "./profileModel";
+import type { UserModel } from "./userModel";
 import type { HistoricalEvent } from "./history/types";
 import { runHistoryIngest } from "./history/ingestHistory";
 import { generatePreviewBlob } from "./imagePreview";
@@ -329,13 +325,14 @@ function App() {
   const [activeBrowserUser, setActiveBrowserUser] = useState(() =>
     loadActiveBrowserUser()
   );
+  const [authenticatedUser, setAuthenticatedUser] = useState<UserModel | null>(null);
   const personalPhotoStorage = useMemo(
     () => createSelectedPersonalPhotoStorage(),
     [activeBrowserUser]
   );
   const personalPhotoCapabilities = useMemo(
-    () => getPersonalPhotoCapabilities(),
-    [activeBrowserUser]
+    () => getPersonalPhotoCapabilitiesForAuthenticatedUser(authenticatedUser),
+    [authenticatedUser]
   );
   const {
     assignPersonalLaneIndex,
@@ -354,7 +351,6 @@ function App() {
   } = personalPhotoStorage;
   const {
     canWrite,
-    canAdminWrite,
     canAddPhoto,
     canAddPhotoToDay,
     canDeleteAllPhotosInDay,
@@ -501,23 +497,6 @@ function App() {
     []
   );
   const isLandingRoute = currentPathname === "/";
-  const currentUser = useMemo<MvpCurrentUser | null>(() => {
-    if (canAdminWrite) {
-      return getMvpSeededCurrentUser();
-    }
-
-    if (activeBrowserUser?.primaryProfileId) {
-      return {
-        id: activeBrowserUser.userId,
-        profileId: activeBrowserUser.primaryProfileId,
-        profileSlug: activeBrowserUser.profileSlug,
-        displayName: activeBrowserUser.profileDisplayName,
-      };
-    }
-
-    return null;
-  }, [canAdminWrite, activeBrowserUser]);
-  const currentUserProfileId = currentUser?.profileId ?? null;
   const {
     routeProfileSlug,
     isRootShortcut: isOwnerShortcutRoute,
@@ -529,23 +508,25 @@ function App() {
       }),
     [activeProfile, currentPathname]
   );
-  const isOwnerViewingCurrentProfile = computeIsOwnerViewingCurrentProfile(
-    currentUserProfileId,
-    isOwnerShortcutRoute && !isLandingRoute,
-    activeProfile
-  );
   const canonicalProfilePath = useMemo(() => {
     if (activeProfile) {
       return `/${activeProfile.slug}`;
     }
-    return getMvpOwnerCanonicalProfilePath();
+    return null;
   }, [activeProfile]);
   const activeProfileDatasetProfileId = activeProfile
     ? getProfileDatasetProfileId(activeProfile)
     : null;
+  const isAuthenticatedAdmin = authenticatedUser?.role === "admin";
+  const isAuthenticatedOwnerViewingCurrentProfile =
+    authenticatedUser !== null &&
+    activeProfile !== null &&
+    activeProfile.ownerUserId === authenticatedUser.id;
   const canAccessAdminFunctions =
-    personalPhotoStorageIsServerMode && canAdminWrite;
-  const canManageCurrentProfile = isOwnerViewingCurrentProfile;
+    personalPhotoStorageIsServerMode && isAuthenticatedAdmin;
+  const canManageCurrentProfile = personalPhotoStorageIsServerMode
+    ? isAuthenticatedAdmin || isAuthenticatedOwnerViewingCurrentProfile
+    : true;
   const canAddPhotoForCurrentView = canAddPhoto && canManageCurrentProfile;
   const canAddPhotoToDayForCurrentView =
     canAddPhotoToDay && canManageCurrentProfile;
@@ -719,6 +700,33 @@ function App() {
       cancelled = true;
     };
   }, [isLandingRoute]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!personalPhotoStorageIsServerMode) {
+      setAuthenticatedUser(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    loadAuthenticatedCurrentUser()
+      .then((user) => {
+        if (!cancelled) {
+          setAuthenticatedUser(user);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setAuthenticatedUser(null);
+          console.error("[auth] load current user failed", err);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBrowserUser]);
 
   useEffect(() => {
     if (isLandingRoute) return;
@@ -1694,7 +1702,15 @@ function App() {
         const title =
           prompt("Название новой группы:", "Я и Саня")?.trim() ?? "Серия";
         seriesId = `series-${Date.now()}`;
-        await saveSeries({ id: seriesId, title });
+        await saveSeries({
+          id: seriesId,
+          title,
+          profileId:
+            sourcePhoto.profileId ??
+            targetPhoto.profileId ??
+            activeProfileDatasetProfileId ??
+            "",
+        });
         setSeriesMap((prev) => ({ ...prev, [seriesId]: title }));
       }
 

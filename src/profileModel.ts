@@ -11,6 +11,11 @@ export type ProfileDatasetBinding = {
 export type ProfileModel = {
   /** Stable profile identity used in routing / owner mapping. */
   id: string;
+  /**
+   * Registered user id that owns this profile. May be `""` for legacy seeded
+   * profiles until linked or inferred during identity store normalization.
+   */
+  ownerUserId: string;
   slug: string;
   displayName: string;
   availability: ProfileAvailability;

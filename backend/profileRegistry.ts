@@ -9,6 +9,7 @@ export type Profile = ProfileModel;
 export const PROFILE_REGISTRY: readonly Profile[] = [
   {
     id: "1",
+    ownerUserId: "",
     slug: "ivan",
     displayName: "Ivan",
     availability: "public",
@@ -18,6 +19,7 @@ export const PROFILE_REGISTRY: readonly Profile[] = [
   },
   {
     id: "2",
+    ownerUserId: "",
     slug: "anna",
     displayName: "Anna",
     availability: "public",

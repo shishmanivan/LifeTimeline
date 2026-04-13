@@ -2,18 +2,19 @@ import { localPersonalPhotoStorage } from "./localPersonalPhotoStorage";
 import {
   createServerPersonalPhotoStorage,
   loadAdminProfiles,
+  loadCurrentAuthenticatedUser,
   type ServerProfileDto,
   type ServerPersonalPhotoStorageOptions,
 } from "./serverPersonalPhotoStorage";
 import type { PersonalPhotoStorage } from "./personalPhotoStorage";
 import { getActiveBrowserWriteAccessToken } from "./browserUserIdentity";
+import type { UserModel, UserRole } from "./userModel";
 
 export type PersonalPhotoStorageMode = "local" | "server";
 
 export type PersonalPhotoCapabilities = {
   /**
-   * Server mode: true when admin env token exists, or when the user explicitly signed in
-   * (active browser session with mvpWriteAccessToken). Local mode: always true.
+   * Server mode: true when the browser has an active user write token; local mode: always true.
    */
   canWrite: boolean;
   canAdminWrite: boolean;
@@ -67,8 +68,8 @@ const SERVER_USER_PERSONAL_PHOTO_CAPABILITIES: PersonalPhotoCapabilities = {
   canAdminWrite: false,
   canEditMetadata: true,
   canEditOffsets: true,
-  canLinkSeries: false,
-  canUnlinkSeries: false,
+  canLinkSeries: true,
+  canUnlinkSeries: true,
   canAddPhoto: true,
   canReplacePhoto: true,
   canDeletePhoto: true,
@@ -98,9 +99,6 @@ type PersonalPhotoStorageEnv = ImportMetaEnv & {
   readonly VITE_PERSONAL_PHOTO_STORAGE?: string;
   readonly VITE_PERSONAL_PHOTO_API_BASE_URL?: string;
   readonly VITE_PERSONAL_PHOTO_API_BASE_PATH?: string;
-  /** Preferred; aligns with backend PERSONAL_WRITE_TOKEN */
-  readonly VITE_PERSONAL_WRITE_TOKEN?: string;
-  readonly VITE_PERSONAL_PHOTO_WRITE_TOKEN?: string;
 };
 
 function normalizeStorageMode(
@@ -121,40 +119,28 @@ export function isPersonalPhotoStorageServerMode(
   return getPersonalPhotoStorageMode(env) === "server";
 }
 
-function getServerPersonalWriteToken(
-  env: PersonalPhotoStorageEnv
-): string | undefined {
-  const fromBrowserIdentity = getActiveBrowserWriteAccessToken();
-  const fromPreferred = env.VITE_PERSONAL_WRITE_TOKEN?.trim();
-  const fromLegacy = env.VITE_PERSONAL_PHOTO_WRITE_TOKEN?.trim();
-  return fromBrowserIdentity || fromPreferred || fromLegacy || undefined;
+function getServerPersonalWriteToken(): string | undefined {
+  return getActiveBrowserWriteAccessToken() ?? undefined;
 }
 
-function getServerAdminWriteToken(
-  env: PersonalPhotoStorageEnv
-): string | undefined {
-  const fromPreferred = env.VITE_PERSONAL_WRITE_TOKEN?.trim();
-  const fromLegacy = env.VITE_PERSONAL_PHOTO_WRITE_TOKEN?.trim();
-  return fromPreferred || fromLegacy || undefined;
-}
-
-export function getPersonalPhotoCapabilities(
+export function getPersonalPhotoCapabilitiesForAuthenticatedUser(
+  authenticatedUser: Pick<UserModel, "role"> | null,
   env: PersonalPhotoStorageEnv = import.meta.env as PersonalPhotoStorageEnv
 ): PersonalPhotoCapabilities {
   if (getPersonalPhotoStorageMode(env) !== "server") {
     return LOCAL_PERSONAL_PHOTO_CAPABILITIES;
   }
-  const activeUserToken = getActiveBrowserWriteAccessToken();
-  if (activeUserToken) {
-    return SERVER_USER_PERSONAL_PHOTO_CAPABILITIES;
-  }
-  const adminToken = getServerAdminWriteToken(env);
-  if (adminToken) {
+
+  const role: UserRole | null = authenticatedUser?.role ?? null;
+  if (role === "admin") {
     return SERVER_PERSONAL_PHOTO_CAPABILITIES;
   }
-  return getServerPersonalWriteToken(env)
-    ? SERVER_USER_PERSONAL_PHOTO_CAPABILITIES
-    : SERVER_READ_ONLY_PERSONAL_PHOTO_CAPABILITIES;
+
+  if (role === "user") {
+    return SERVER_USER_PERSONAL_PHOTO_CAPABILITIES;
+  }
+
+  return SERVER_READ_ONLY_PERSONAL_PHOTO_CAPABILITIES;
 }
 
 export function createSelectedPersonalPhotoStorage(
@@ -166,7 +152,7 @@ export function createSelectedPersonalPhotoStorage(
     const options: ServerPersonalPhotoStorageOptions = {
       baseUrl: env.VITE_PERSONAL_PHOTO_API_BASE_URL,
       apiBasePath: env.VITE_PERSONAL_PHOTO_API_BASE_PATH,
-      writeToken: getServerPersonalWriteToken(env),
+      writeToken: getServerPersonalWriteToken(),
     };
     return createServerPersonalPhotoStorage(options);
   }
@@ -183,7 +169,20 @@ export async function loadSelectedAdminProfiles(
 
   return await loadAdminProfiles({
     baseUrl: env.VITE_PERSONAL_PHOTO_API_BASE_URL,
-    writeToken: getServerAdminWriteToken(env),
+    writeToken: getServerPersonalWriteToken(),
+  });
+}
+
+export async function loadAuthenticatedCurrentUser(
+  env: PersonalPhotoStorageEnv = import.meta.env as PersonalPhotoStorageEnv
+): Promise<UserModel | null> {
+  if (getPersonalPhotoStorageMode(env) !== "server") {
+    return null;
+  }
+
+  return await loadCurrentAuthenticatedUser({
+    baseUrl: env.VITE_PERSONAL_PHOTO_API_BASE_URL,
+    writeToken: getServerPersonalWriteToken(),
   });
 }
 
@@ -191,4 +190,3 @@ export const personalPhotoStorage = createSelectedPersonalPhotoStorage();
 export const personalPhotoStorageMode = getPersonalPhotoStorageMode();
 export const personalPhotoStorageIsServerMode =
   isPersonalPhotoStorageServerMode();
-export const personalPhotoCapabilities = getPersonalPhotoCapabilities();

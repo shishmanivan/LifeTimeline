@@ -1,7 +1,7 @@
 import path from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { ProfileModel } from "../src/profileModel";
-import type { UserModel } from "../src/userModel";
+import { normalizeUserRole, type UserModel } from "../src/userModel";
 import { PROFILE_REGISTRY } from "./profileRegistry";
 
 export type StoredUserRecord = UserModel & {
@@ -30,16 +30,42 @@ const DEFAULT_IDENTITY_STORE_PATH = path.resolve(
 );
 
 function cloneProfile(profile: ProfileModel): ProfileModel {
+  const ownerUserId =
+    typeof profile.ownerUserId === "string" ? profile.ownerUserId : "";
   return {
     ...profile,
+    ownerUserId,
     personalDataset: {
       ...profile.personalDataset,
     },
   };
 }
 
+/**
+ * Legacy profiles may omit `ownerUserId` on disk; fill from `user.primaryProfileId`
+ * when unambiguous. Skips profiles that already have a non-empty owner.
+ */
+function assignInferredProfileOwners(
+  profiles: ProfileModel[],
+  users: readonly StoredUserRecord[]
+): ProfileModel[] {
+  return profiles.map((profile) => {
+    if (profile.ownerUserId.trim() !== "") {
+      return profile;
+    }
+    const ownerId = users.find((u) => u.primaryProfileId === profile.id)?.id;
+    if (ownerId) {
+      return { ...profile, ownerUserId: ownerId };
+    }
+    return profile;
+  });
+}
+
 function cloneUser(user: StoredUserRecord): StoredUserRecord {
-  return { ...user };
+  return {
+    ...user,
+    role: normalizeUserRole(user.role),
+  };
 }
 
 function buildSeedIdentityStore(): IdentityStoreData {
@@ -67,7 +93,10 @@ async function writeIdentityStoreFile(
 }
 
 function mergeSeedProfiles(store: IdentityStoreData): IdentityStoreData {
-  const profiles = store.profiles.map((profile) => cloneProfile(profile));
+  const users = store.users.map((user) => cloneUser(user));
+  let profiles = store.profiles.map((profile) => cloneProfile(profile));
+  profiles = assignInferredProfileOwners(profiles, users);
+
   const existingIds = new Set(profiles.map((profile) => profile.id));
   const existingSlugs = new Set(profiles.map((profile) => profile.slug));
 
@@ -81,9 +110,11 @@ function mergeSeedProfiles(store: IdentityStoreData): IdentityStoreData {
     profiles.push(cloneProfile(seedProfile));
   }
 
+  profiles = assignInferredProfileOwners(profiles, users);
+
   return {
     formatVersion: 1,
-    users: store.users.map((user) => cloneUser(user)),
+    users,
     profiles,
   };
 }
