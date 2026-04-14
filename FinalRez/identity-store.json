@@ -1,0 +1,36 @@
+{
+  "formatVersion": 1,
+  "users": [
+    {
+      "id": "user-ivan-admin",
+      "email": "shishmaniv@gmail.com",
+      "status": "active",
+      "createdAt": "2026-04-13T00:00:00.000Z",
+      "role": "admin",
+      "primaryProfileId": "1",
+      "mvpWriteAccessToken": "mvp-write-6671d4bd-6aa0-4bd0-9b64-7bfd368f82a7"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "1",
+      "ownerUserId": "user-ivan-admin",
+      "slug": "ivan",
+      "displayName": "Ivan",
+      "availability": "public",
+      "personalDataset": {
+        "profileId": "1"
+      }
+    },
+    {
+      "id": "2",
+      "ownerUserId": "",
+      "slug": "anna",
+      "displayName": "Anna",
+      "availability": "public",
+      "personalDataset": {
+        "profileId": "2"
+      }
+    }
+  ]
+}
