@@ -740,7 +740,9 @@ async function handleRequest(
         const statusCode =
           error.code === "not-found" || error.code === "profile-missing"
             ? 404
-            : 400;
+            : error.code === "email-delivery-failed"
+              ? 503
+              : 400;
         sendJson(res, statusCode, {
           error: error.code,
           message: error.message,

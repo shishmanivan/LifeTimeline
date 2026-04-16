@@ -42,7 +42,7 @@ export type RequestRecoveryCodeInput = {
 
 export type RequestRecoveryCodeResult = {
   ok: true;
-  delivery: "server-log";
+  delivery: "server-log" | "email";
 };
 
 export type VerifyRecoveryCodeInput = {

@@ -7,6 +7,10 @@ import {
   type VerifyRecoveryCodeInput,
 } from "../src/userModel";
 import { updateIdentityStore } from "./identityStore";
+import {
+  isRecoveryEmailConfigured,
+  sendRecoveryCodeEmail,
+} from "./recoveryEmail";
 
 const RECOVERY_CODE_TTL_MS = 15 * 60 * 1000;
 
@@ -19,8 +23,10 @@ export class RecoveryError extends Error {
       | "profile-missing"
       | "invalid-code"
       | "expired-code"
+      | "email-delivery-failed",
+    options?: { cause?: unknown }
   ) {
-    super(message);
+    super(message, options);
     this.name = "RecoveryError";
   }
 }
@@ -41,7 +47,8 @@ export async function requestRecoveryCode(
     throw new RecoveryError("A valid email is required.", "invalid-input");
   }
 
-  let result: RequestRecoveryCodeResult | null = null;
+  let recoveryCode = "";
+  let expiresAt = "";
 
   await updateIdentityStore((store) => {
     const userIndex = store.users.findIndex(
@@ -62,9 +69,9 @@ export async function requestRecoveryCode(
       );
     }
 
-    const recoveryCode = generateRecoveryCode();
+    recoveryCode = generateRecoveryCode();
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + RECOVERY_CODE_TTL_MS).toISOString();
+    expiresAt = new Date(now.getTime() + RECOVERY_CODE_TTL_MS).toISOString();
 
     store.users[userIndex] = {
       ...user,
@@ -74,22 +81,33 @@ export async function requestRecoveryCode(
         expiresAt,
       },
     };
-
-    console.log(
-      `[personal-backend] recovery code for ${email}: ${recoveryCode} (expires ${expiresAt})`
-    );
-
-    result = {
-      ok: true,
-      delivery: "server-log",
-    };
   });
 
-  if (!result) {
-    throw new Error("Recovery code request failed.");
+  const useEmail = isRecoveryEmailConfigured();
+  if (useEmail) {
+    try {
+      await sendRecoveryCodeEmail({
+        to: email,
+        code: recoveryCode,
+        expiresAtIso: expiresAt,
+      });
+    } catch (cause) {
+      throw new RecoveryError(
+        "Could not deliver the recovery code by email. Please try again later.",
+        "email-delivery-failed",
+        { cause }
+      );
+    }
+    console.log(
+      `[personal-backend] recovery code email sent for ${email} (expires ${expiresAt})`
+    );
+    return { ok: true, delivery: "email" };
   }
 
-  return result;
+  console.log(
+    `[personal-backend] recovery code for ${email}: ${recoveryCode} (expires ${expiresAt})`
+  );
+  return { ok: true, delivery: "server-log" };
 }
 
 export async function verifyRecoveryCode(
