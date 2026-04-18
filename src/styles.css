@@ -32,13 +32,34 @@ body {
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid #111;
-  padding: 0 16px 8px;
+  padding: 0 16px 4px;
+  position: relative;
+  z-index: 50;
+  background: #fff;
 }
 
 .top-bar h1 {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
+}
+
+.top-bar-home-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  text-decoration: none;
+  margin-top: -16px;
+  margin-bottom: -8px;
+}
+
+.top-bar-home-logo {
+  display: block;
+  width: auto;
+  height: 58px;
+  max-width: 200px;
+  object-fit: contain;
 }
 
 .top-bar-right {
@@ -78,6 +99,7 @@ body {
   padding: 20px;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.94);
+  overflow-x: hidden;
   box-shadow:
     0 14px 32px rgba(0, 0, 0, 0.12),
     0 4px 10px rgba(0, 0, 0, 0.08);
@@ -113,6 +135,11 @@ body {
   color: #444;
 }
 
+.registration-card-copy-emphasis {
+  font-weight: 600;
+  color: #222;
+}
+
 .registration-form {
   display: flex;
   flex-direction: column;
@@ -134,6 +161,11 @@ body {
   font: inherit;
   background: #fff;
   color: #111;
+}
+
+.registration-field input[readonly] {
+  background: #f5f5f5;
+  color: #333;
 }
 
 .registration-error {
@@ -252,19 +284,25 @@ body {
   gap: 16px;
   max-height: calc(100vh - 48px);
   overflow-y: auto;
-  padding-right: 4px;
+  overflow-x: hidden;
+  padding-right: 8px;
+  box-sizing: border-box;
 }
 
-.landing-auth-entry-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+.landing-auth-column .registration-card {
+  /* Keep auth cards/buttons within the grid column; avoid clipping rounded corners. */
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
-.landing-auth-entry-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.landing-auth-or-divider {
+  margin: 0;
+  text-align: center;
+  font-size: clamp(0.78rem, 2.2vw, 0.9rem);
+  line-height: 1.3;
+  color: #555;
+  letter-spacing: 0.02em;
 }
 
 .scale {

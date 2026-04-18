@@ -42,10 +42,15 @@ import {
   verifyRecoveryCode,
   RecoveryError,
 } from "./recoveryService";
+import {
+  authenticateWithGoogle,
+  GoogleAuthError,
+} from "./googleAuthService";
 import type { ProfileModel } from "../src/profileModel";
 import { getProfileDatasetProfileId } from "../src/profileModel";
 import type {
   CurrentAuthenticatedUserResult,
+  GoogleAuthInput,
   RecoverAccessInput,
   RegisterUserInput,
   RequestRecoveryCodeInput,
@@ -84,7 +89,7 @@ function applyCors(res: ServerResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader(
     "Access-Control-Allow-Methods",
-    "GET,PUT,PATCH,DELETE,OPTIONS"
+    "GET,POST,PUT,PATCH,DELETE,OPTIONS"
   );
   res.setHeader(
     "Access-Control-Allow-Headers",
@@ -417,6 +422,26 @@ function parseVerifyRecoveryCodeInput(body: unknown): VerifyRecoveryCodeInput {
   return {
     email: body.email,
     code: body.code,
+  };
+}
+
+function parseGoogleAuthInput(body: unknown): GoogleAuthInput {
+  if (!isRecord(body)) {
+    throw new GoogleAuthError(
+      "Google auth body must be a JSON object.",
+      "invalid-input"
+    );
+  }
+
+  if (typeof body.credential !== "string") {
+    throw new GoogleAuthError(
+      'Field "credential" must be a string.',
+      "invalid-input"
+    );
+  }
+
+  return {
+    credential: body.credential,
   };
 }
 
@@ -765,6 +790,34 @@ async function handleRequest(
           error.code === "not-found" || error.code === "profile-missing"
             ? 404
             : 400;
+        sendJson(res, statusCode, {
+          error: error.code,
+          message: error.message,
+        });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/auth/google") {
+    try {
+      const input = parseGoogleAuthInput(await readJsonBody(req));
+      const result = await authenticateWithGoogle(input);
+      sendJson(res, 200, result);
+      return;
+    } catch (error) {
+      if (error instanceof GoogleAuthError) {
+        const statusCode =
+          error.code === "server-misconfigured"
+            ? 503
+            : error.code === "conflict"
+              ? 409
+              : error.code === "profile-missing"
+                ? 404
+                : error.code === "invalid-token"
+                  ? 401
+                  : 400;
         sendJson(res, statusCode, {
           error: error.code,
           message: error.message,

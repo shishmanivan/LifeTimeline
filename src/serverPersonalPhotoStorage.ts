@@ -1,3 +1,4 @@
+import { getActiveBrowserWriteAccessToken } from "./browserUserIdentity";
 import { assignPersonalLaneIndex } from "./db";
 import type {
   PersonalPhotoStorage,
@@ -8,6 +9,7 @@ import type {
 import type { ProfileModel } from "./profileModel";
 import type {
   CurrentAuthenticatedUserResult,
+  GoogleAuthInput,
   RequestRecoveryCodeInput,
   RequestRecoveryCodeResult,
   RegisterUserInput,
@@ -37,8 +39,10 @@ export type ServerPersonalPhotoStorageOptions = {
   fetchImpl?: FetchLike;
   /** Optional headers applied to JSON requests. */
   defaultHeaders?: HeadersInit;
-  /** Optional shared secret for protected write endpoints. */
+  /** Optional shared secret for protected write endpoints (otherwise read from browser each request). */
   writeToken?: string;
+  /** When set, invoked at the start of each mutating operation; throw to block writes. */
+  assertWriteAllowed?: () => void;
 };
 
 type ServerPhotoFields = {
@@ -267,6 +271,24 @@ export async function verifyRecoveryCodeViaServer(
   );
 }
 
+export async function authenticateWithGoogleViaServer(
+  input: GoogleAuthInput,
+  options: Pick<ServerPersonalPhotoStorageOptions, "baseUrl" | "fetchImpl"> = {}
+): Promise<RegisterUserResult> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  return await fetchJson<RegisterUserResult>(
+    fetchImpl,
+    joinApiUrl(options.baseUrl, "", "/api/auth/google"),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    }
+  );
+}
+
 function getPhotosListUrl(
   baseUrl: string | undefined,
   apiBasePath: string
@@ -449,7 +471,16 @@ export function createServerPersonalPhotoStorage(
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiBasePath = options.apiBasePath ?? DEFAULT_API_BASE_PATH;
   const defaultHeaders = options.defaultHeaders ?? {};
-  const writeAuthHeaders = getWriteAuthHeaders(options.writeToken);
+
+  const resolveWriteToken = (): string | undefined =>
+    (options.writeToken ?? getActiveBrowserWriteAccessToken()) ?? undefined;
+
+  const resolveWriteAuthHeaders = (): HeadersInit | undefined =>
+    getWriteAuthHeaders(resolveWriteToken());
+
+  const ensureWriteAllowed = (): void => {
+    options.assertWriteAllowed?.();
+  };
 
   const apiUrl = (path: string) => joinApiUrl(options.baseUrl, apiBasePath, path);
 
@@ -457,7 +488,7 @@ export function createServerPersonalPhotoStorage(
     headers: {
       "Content-Type": "application/json",
       ...defaultHeaders,
-      ...writeAuthHeaders,
+      ...resolveWriteAuthHeaders(),
     },
     body: JSON.stringify(body),
   });
@@ -486,6 +517,7 @@ export function createServerPersonalPhotoStorage(
     },
 
     async savePhoto(photo: PhotoRecord): Promise<void> {
+      ensureWriteAllowed();
       const request: SaveServerPersonalPhotoRequest = {
         metadata: toServerPhotoFields(photo),
         image: photo.imageBlob,
@@ -494,25 +526,27 @@ export function createServerPersonalPhotoStorage(
 
       await requestOk(fetchImpl, apiUrl(`/photos/${encodeURIComponent(photo.id)}`), {
         method: "PUT",
-        headers: writeAuthHeaders,
+        headers: resolveWriteAuthHeaders(),
         body: buildSavePhotoFormData(request),
       });
     },
 
     async deletePhoto(id: string): Promise<void> {
+      ensureWriteAllowed();
       await requestOk(fetchImpl, apiUrl(`/photos/${encodeURIComponent(id)}`), {
         method: "DELETE",
-        headers: writeAuthHeaders,
+        headers: resolveWriteAuthHeaders(),
       });
     },
 
     async deletePhotosInDay(date: string): Promise<string[]> {
+      ensureWriteAllowed();
       const response = await fetchJson<DeleteServerPersonalPhotosInDayResponse>(
         fetchImpl,
         apiUrl(`/photos/by-date/${encodeURIComponent(date)}`),
         {
           method: "DELETE",
-          headers: writeAuthHeaders,
+          headers: resolveWriteAuthHeaders(),
         }
       );
       return response.deletedPhotoIds;
@@ -523,6 +557,7 @@ export function createServerPersonalPhotoStorage(
       offsetY: number,
       offsetXDays: number
     ): Promise<void> {
+      ensureWriteAllowed();
       const body: UpdateServerPhotoOffsetsRequest = { offsetY, offsetXDays };
       await requestOk(
         fetchImpl,
@@ -538,6 +573,7 @@ export function createServerPersonalPhotoStorage(
       id: string,
       update: PhotoMetadataUpdate
     ): Promise<void> {
+      ensureWriteAllowed();
       const body: PatchServerPersonalPhotoMetadataRequest = update;
       await requestOk(
         fetchImpl,
@@ -554,6 +590,7 @@ export function createServerPersonalPhotoStorage(
       imageBlob: Blob,
       previewBlob?: Blob
     ): Promise<void> {
+      ensureWriteAllowed();
       const formData = new FormData();
       appendBlob(
         formData,
@@ -572,12 +609,13 @@ export function createServerPersonalPhotoStorage(
 
       await requestOk(fetchImpl, apiUrl(`/photos/${encodeURIComponent(id)}/image`), {
         method: "PUT",
-        headers: writeAuthHeaders,
+        headers: resolveWriteAuthHeaders(),
         body: formData,
       });
     },
 
     async updatePhotoPreview(id: string, previewBlob: Blob): Promise<void> {
+      ensureWriteAllowed();
       const formData = new FormData();
       appendBlob(
         formData,
@@ -591,7 +629,7 @@ export function createServerPersonalPhotoStorage(
         apiUrl(`/photos/${encodeURIComponent(id)}/preview`),
         {
           method: "PUT",
-          headers: writeAuthHeaders,
+          headers: resolveWriteAuthHeaders(),
           body: formData,
         }
       );
@@ -601,6 +639,7 @@ export function createServerPersonalPhotoStorage(
       id: string,
       seriesId: string | undefined
     ): Promise<void> {
+      ensureWriteAllowed();
       const body: UpdateServerPhotoSeriesRequest = {
         seriesId: seriesId ?? null,
       };
@@ -623,6 +662,7 @@ export function createServerPersonalPhotoStorage(
     },
 
     async saveSeries(series: SeriesRecord): Promise<void> {
+      ensureWriteAllowed();
       await requestOk(
         fetchImpl,
         apiUrl(`/series/${encodeURIComponent(series.id)}`),

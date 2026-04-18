@@ -6,8 +6,14 @@ function normalizeEmail(email: string): string {
 }
 
 function toPublicUser(user: StoredUserRecord): UserModel {
-  const { mvpWriteAccessToken: _ignoredToken, ...publicUser } = user;
-  return publicUser;
+  return {
+    id: user.id,
+    email: user.email,
+    status: user.status,
+    createdAt: user.createdAt,
+    role: user.role,
+    primaryProfileId: user.primaryProfileId,
+  };
 }
 
 export async function listUsers(): Promise<readonly UserModel[]> {

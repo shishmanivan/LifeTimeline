@@ -6,6 +6,7 @@ import { normalizeUserRole, type UserModel } from "../src/userModel";
 import { PROFILE_REGISTRY } from "./profileRegistry";
 
 export type StoredUserRecord = UserModel & {
+  googleSubject?: string;
   /**
    * MVP-only per-user write token persisted server-side.
    * This is a transition bridge from owner token to user-owned editing.

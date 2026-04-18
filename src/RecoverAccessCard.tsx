@@ -6,6 +6,8 @@ import {
 } from "./serverPersonalPhotoStorage";
 import type { RememberedBrowserUser } from "./userModel";
 
+type LoginStep = "enter_email" | "enter_code";
+
 type RecoverAccessCardProps = {
   onRecovered: (
     profileSlug: string,
@@ -18,9 +20,9 @@ export function RecoverAccessCard({
   onRecovered,
   onBack,
 }: RecoverAccessCardProps) {
+  const [loginStep, setLoginStep] = useState<LoginStep>("enter_email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [codeRequested, setCodeRequested] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -38,7 +40,7 @@ export function RecoverAccessCard({
       await requestRecoveryCodeViaServer({
         email: trimmedEmail,
       });
-      setCodeRequested(true);
+      setLoginStep("enter_code");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("404")) {
@@ -89,79 +91,125 @@ export function RecoverAccessCard({
     }
   };
 
+  const goBackToEmail = () => {
+    setLoginStep("enter_email");
+    setCode("");
+    setErrorMessage(null);
+  };
+
   return (
     <section className="registration-card registration-card-secondary">
       <div className="registration-card-eyebrow">Вход</div>
       <h2 className="registration-card-title">Войти</h2>
-      <p className="registration-card-copy">
-        Укажите email, чтобы получить одноразовый recovery code и войти в этот
-        браузер.
-      </p>
-      <p className="registration-card-copy">
-        Не можете войти? Этим же способом можно восстановить доступ к уже
-        созданному профилю.
-      </p>
 
-      <form
-        className="registration-form"
-        onSubmit={codeRequested ? handleVerifyCode : handleRequestCode}
-      >
-        <label className="registration-field">
-          <span>Email</span>
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@example.com"
-            autoComplete="email"
-            required
-          />
-        </label>
-
-        {codeRequested && (
-          <label className="registration-field">
-            <span>Recovery code</span>
-            <input
-              type="text"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder="123456"
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              required
-            />
-          </label>
-        )}
-
-        {errorMessage && (
-          <p className="registration-error" role="alert">
-            {errorMessage}
+      {loginStep === "enter_email" ? (
+        <>
+          <p className="registration-card-copy">
+            Укажите email — мы отправим одноразовый код для входа в этот браузер.
           </p>
-        )}
+          <p className="registration-card-copy">
+            Не можете войти? Этим же способом можно восстановить доступ к уже
+            созданному профилю.
+          </p>
+          <form className="registration-form" onSubmit={handleRequestCode}>
+            <label className="registration-field">
+              <span>Email</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+                required
+              />
+            </label>
 
-        <button
-          type="submit"
-          className="registration-submit"
-          disabled={submitting}
-        >
-          {submitting
-            ? codeRequested
-              ? "Подтверждаем код…"
-              : "Запрашиваем код…"
-            : codeRequested
-              ? "Подтвердить recovery code"
-              : "Запросить recovery code"}
-        </button>
-        {onBack && (
-          <button
-            type="button"
-            className="registration-secondary-action"
-            onClick={onBack}
-          >
-            Назад
-          </button>
-        )}
-      </form>
+            {errorMessage && (
+              <p className="registration-error" role="alert">
+                {errorMessage}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              className="registration-submit"
+              disabled={submitting}
+            >
+              {submitting ? "Отправляем код…" : "Получить код"}
+            </button>
+            {onBack && (
+              <button
+                type="button"
+                className="registration-secondary-action"
+                onClick={onBack}
+              >
+                Назад
+              </button>
+            )}
+          </form>
+        </>
+      ) : (
+        <>
+          <p className="registration-card-copy registration-card-copy-emphasis">
+            Введите код из письма
+          </p>
+          <form className="registration-form" onSubmit={handleVerifyCode}>
+            <label className="registration-field">
+              <span>Email</span>
+              <input
+                type="email"
+                value={email}
+                readOnly
+                autoComplete="email"
+              />
+            </label>
+
+            <label className="registration-field">
+              <span>Код</span>
+              <input
+                type="text"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                placeholder="123456"
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                required
+              />
+            </label>
+
+            {errorMessage && (
+              <p className="registration-error" role="alert">
+                {errorMessage}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              className="registration-submit"
+              disabled={submitting}
+            >
+              {submitting ? "Подтверждаем…" : "Подтвердить"}
+            </button>
+
+            <button
+              type="button"
+              className="registration-secondary-action"
+              onClick={goBackToEmail}
+            >
+              Изменить email
+            </button>
+            {onBack && (
+              <button
+                type="button"
+                className="registration-secondary-action"
+                onClick={onBack}
+              >
+                Назад
+              </button>
+            )}
+          </form>
+        </>
+      )}
     </section>
   );
 }

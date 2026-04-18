@@ -11,6 +11,7 @@ import {
 } from "./personalPhotoStorageSelector";
 import type { PhotoRecord } from "./personalPhotoStorage";
 import {
+  authenticateWithGoogleViaServer,
   loadProfileForCurrentRoute,
   type ServerProfileDto,
 } from "./serverPersonalPhotoStorage";
@@ -44,7 +45,6 @@ import { PersonalPhotoModal } from "./PersonalPhotoModal";
 import { DataBackupModal } from "./DataBackupModal";
 import { AdminFunctionsModal } from "./AdminFunctionsModal";
 import { UserSessionSettingsModal } from "./UserSessionSettingsModal";
-import { RegistrationCard } from "./RegistrationCard";
 import { RecoverAccessCard } from "./RecoverAccessCard";
 import {
   clearActiveBrowserUser,
@@ -52,14 +52,15 @@ import {
   loadActiveBrowserUser,
   loadRememberedBrowserUser,
   saveActiveBrowserUser,
+  saveRememberedBrowserUser,
 } from "./browserUserIdentity";
 import ppyMainLogoUrl from "../PPYMainLogo.png";
+import ppyCompactLogoUrl from "../PPY4cut.png";
 import ivanPhotoUrl from "../IvanPhoto.JPG";
+import { googleClientId, hasGoogleAuthConfig } from "./googleAuthConfig";
+import { loadGoogleIdentityScript } from "./googleIdentityScript";
 
 export type { Offsets };
-
-const PERSONAL_SERVER_DISABLED_WRITES_MESSAGE =
-  "Server mode: delete-all-in-day and backup writes are still disabled";
 
 type Scale = "30d" | "60d" | "90d" | "1y" | "2y" | "5y" | "10y";
 
@@ -326,9 +327,20 @@ function App() {
     loadActiveBrowserUser()
   );
   const [authenticatedUser, setAuthenticatedUser] = useState<UserModel | null>(null);
+  const authenticatedUserRef = useRef<UserModel | null>(null);
+  authenticatedUserRef.current = authenticatedUser;
+
   const personalPhotoStorage = useMemo(
-    () => createSelectedPersonalPhotoStorage(),
-    [activeBrowserUser]
+    () =>
+      createSelectedPersonalPhotoStorage(undefined, {
+        assertWriteAllowed: () => {
+          if (!personalPhotoStorageIsServerMode) return;
+          if (!authenticatedUserRef.current) {
+            throw new Error("Not authenticated");
+          }
+        },
+      }),
+    []
   );
   const personalPhotoCapabilities = useMemo(
     () => getPersonalPhotoCapabilitiesForAuthenticatedUser(authenticatedUser),
@@ -367,13 +379,32 @@ function App() {
     personalPhotoStorageIsServerMode && !canWrite;
   const [userSessionSettingsModalOpen, setUserSessionSettingsModalOpen] =
     useState(false);
-  const [landingAuthView, setLandingAuthView] = useState<
-    "menu" | "register" | "login"
-  >("menu");
+  const [googleScriptStatus, setGoogleScriptStatus] = useState<
+    "idle" | "loading" | "loaded" | "error"
+  >("idle");
+
+  const refreshAuthenticatedUser = useCallback(async () => {
+    if (!personalPhotoStorageIsServerMode) {
+      setAuthenticatedUser(null);
+      return;
+    }
+    try {
+      const user = await loadAuthenticatedCurrentUser();
+      setAuthenticatedUser(user);
+    } catch (err) {
+      setAuthenticatedUser(null);
+      console.error("[auth] load current user failed", err);
+    }
+  }, []);
+
   const handleBrowserActiveSignOut = useCallback(() => {
     clearActiveBrowserUser();
     setActiveBrowserUser(null);
+    setAuthenticatedUser(null);
     setUserSessionSettingsModalOpen(false);
+    if (typeof window !== "undefined") {
+      window.location.assign("/");
+    }
   }, []);
   const handleForgetThisDevice = useCallback(() => {
     if (
@@ -388,6 +419,7 @@ function App() {
     clearRememberedBrowserUser();
     setActiveBrowserUser(null);
     setRememberedBrowserUser(null);
+    setAuthenticatedUser(null);
     setUserSessionSettingsModalOpen(false);
   }, []);
   const persisted = useMemo(loadTimelineState, []);
@@ -409,6 +441,10 @@ function App() {
   const imageBlobsRef = useRef<Map<string, Blob>>(new Map());
   const overlayUrlRef = useRef<string | null>(null);
   const overlayPhotoIdRef = useRef<string | null>(null);
+  const googleButtonContainerRef = useRef<HTMLDivElement | null>(null);
+  const googleIdentityInitializedRef = useRef(false);
+  const googleButtonRenderedRef = useRef(false);
+  const googleLoginInFlightRef = useRef(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [gotoDateModalOpen, setGotoDateModalOpen] = useState(false);
   const [layersModalOpen, setLayersModalOpen] = useState(false);
@@ -497,6 +533,12 @@ function App() {
     []
   );
   const isLandingRoute = currentPathname === "/";
+  const canRenderGoogleButton =
+    isLandingRoute &&
+    hasGoogleAuthConfig() &&
+    googleScriptStatus === "loaded" &&
+    typeof window !== "undefined" &&
+    window.google?.accounts?.id !== undefined;
   const {
     routeProfileSlug,
     isRootShortcut: isOwnerShortcutRoute,
@@ -546,15 +588,6 @@ function App() {
     canReplacePhoto && canManageCurrentProfile;
   const canUnlinkSeriesForCurrentView =
     canUnlinkSeries && canManageCurrentProfile;
-  const hasRestrictedPersonalWrites =
-    !canAddPhotoForCurrentView ||
-    !canAddPhotoToDayForCurrentView ||
-    !canDeleteAllPhotosInDayForCurrentView ||
-    !canDeletePhotoForCurrentView ||
-    !canImportBackupForCurrentView ||
-    !canReplacePhotoForCurrentView ||
-    !canWritePreview;
-
   const getActiveOffsets = (id: string): Offsets => {
     const pend = pendingOffsets[id];
     if (pend) return pend;
@@ -656,6 +689,80 @@ function App() {
   }, [refreshSeriesUiState]);
 
   useEffect(() => {
+    if (!hasGoogleAuthConfig()) return;
+    let cancelled = false;
+    setGoogleScriptStatus("loading");
+    loadGoogleIdentityScript()
+      .then(() => {
+        if (!cancelled) setGoogleScriptStatus("loaded");
+      })
+      .catch(() => {
+        if (!cancelled) setGoogleScriptStatus("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canRenderGoogleButton) {
+      googleButtonRenderedRef.current = false;
+      return;
+    }
+    const googleId = window.google?.accounts?.id;
+    const container = googleButtonContainerRef.current;
+    if (!googleId || !container) return;
+
+    if (!googleIdentityInitializedRef.current) {
+      googleId.initialize({
+        client_id: googleClientId,
+        callback: (response) => {
+          if (!response.credential || googleLoginInFlightRef.current) {
+            return;
+          }
+          googleLoginInFlightRef.current = true;
+          console.debug("Google credential received");
+          console.debug("Google credential length", response.credential.length);
+          void (async () => {
+            try {
+              const result = await authenticateWithGoogleViaServer({
+                credential: response.credential,
+              });
+              const rememberedUser = saveRememberedBrowserUser(result);
+              setRememberedBrowserUser(rememberedUser);
+              if (rememberedUser) {
+                saveActiveBrowserUser(rememberedUser);
+                setActiveBrowserUser(rememberedUser);
+              }
+              if (personalPhotoStorageIsServerMode) {
+                await refreshAuthenticatedUser();
+              }
+              if (typeof window !== "undefined") {
+                window.location.assign(`/${result.profile.slug}`);
+              }
+            } catch (error) {
+              console.error("[auth] Google sign-in failed", error);
+            } finally {
+              googleLoginInFlightRef.current = false;
+            }
+          })();
+        },
+      });
+      googleIdentityInitializedRef.current = true;
+    }
+
+    if (googleButtonRenderedRef.current) return;
+    container.replaceChildren();
+    googleId.renderButton(container, {
+      theme: "outline",
+      size: "large",
+      text: "continue_with",
+      shape: "rectangular",
+    });
+    googleButtonRenderedRef.current = true;
+  }, [canRenderGoogleButton, refreshAuthenticatedUser]);
+
+  useEffect(() => {
     if (isLandingRoute) return;
     let cancelled = false;
     loadPhotosFromDb().catch((err) => {
@@ -701,6 +808,7 @@ function App() {
     };
   }, [isLandingRoute]);
 
+  /** Resolve session from GET /api/me (write token from storage). Re-run when active token row changes. */
   useEffect(() => {
     let cancelled = false;
     if (!personalPhotoStorageIsServerMode) {
@@ -710,23 +818,24 @@ function App() {
       };
     }
 
-    loadAuthenticatedCurrentUser()
-      .then((user) => {
+    void (async () => {
+      try {
+        const user = await loadAuthenticatedCurrentUser();
         if (!cancelled) {
           setAuthenticatedUser(user);
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         if (!cancelled) {
           setAuthenticatedUser(null);
           console.error("[auth] load current user failed", err);
         }
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [activeBrowserUser]);
+  }, [activeBrowserUser, personalPhotoStorageIsServerMode]);
 
   useEffect(() => {
     if (isLandingRoute) return;
@@ -1039,19 +1148,8 @@ function App() {
   }, [axisDates]);
 
   const [ingestVersion, setIngestVersion] = useState(0);
-  const [ingestRefreshing, setIngestRefreshing] = useState(false);
   useEffect(() => {
     runHistoryIngest().finally(() => setIngestVersion((v) => v + 1));
-  }, []);
-
-  const handleRefreshTimeline = useCallback(async () => {
-    setIngestRefreshing(true);
-    try {
-      await runHistoryIngest();
-      setIngestVersion((v) => v + 1);
-    } finally {
-      setIngestRefreshing(false);
-    }
   }, []);
 
   useEffect(() => {
@@ -2125,10 +2223,8 @@ function App() {
     /** Step 6 baseline 112px; Step 7 ~20% smaller → 112 × 0.8 ≈ 90. */
     const landingAvatarPx = 90;
     const landingPageBg = "#e6e6e6";
-    const landingSessionUser = rememberedBrowserUser ?? activeBrowserUser;
-    const isRememberedUserActive =
-      rememberedBrowserUser != null &&
-      activeBrowserUser?.userId === rememberedBrowserUser.userId;
+    /** Resume shortcut uses remembered identity only; live auth comes from /api/me. */
+    const landingSessionUser = rememberedBrowserUser;
     return (
       <div
         className="page"
@@ -2186,125 +2282,56 @@ function App() {
             </div>
 
             <div className="landing-auth-column">
+              {canRenderGoogleButton ? (
+                <div
+                  ref={googleButtonContainerRef}
+                  style={{ minHeight: 40, margin: "0 0 12px" }}
+                />
+              ) : null}
               {landingSessionUser && (
-                <section className="registration-card registration-card-primary">
-                  <div className="registration-card-eyebrow">Этот браузер</div>
-                  <h2 className="registration-card-title">
-                    {isRememberedUserActive ? "Вы вошли" : "Сохранённый доступ"}
-                  </h2>
-                  <p className="registration-card-copy" style={{ marginBottom: 12 }}>
-                    {rememberedBrowserUser ? (
-                      isRememberedUserActive ? (
-                        <>
-                          Вы вошли как{" "}
-                          <strong>{rememberedBrowserUser.profileDisplayName}</strong>{" "}
-                          (`@{rememberedBrowserUser.profileSlug}`).
-                        </>
-                      ) : (
-                        <>
-                          В этом браузере сохранён профиль{" "}
-                          <strong>{rememberedBrowserUser.profileDisplayName}</strong>{" "}
-                          (`@{rememberedBrowserUser.profileSlug}`). Можно быстро
-                          войти и продолжить работу.
-                        </>
-                      )
-                    ) : (
-                      <>
-                        В этом браузере активна сессия{" "}
-                        <strong>{landingSessionUser.profileDisplayName}</strong>{" "}
-                        (`@{landingSessionUser.profileSlug}`).
-                      </>
-                    )}
-                  </p>
-                  {activeBrowserUser?.userId === landingSessionUser.userId ? (
-                    <a
-                      className="registration-submit registration-submit-link"
-                      href={`/${landingSessionUser.profileSlug}`}
-                    >
-                      Открыть мой профиль
-                    </a>
-                  ) : rememberedBrowserUser ? (
-                    <button
-                      type="button"
-                      className="registration-submit"
-                      onClick={() => {
-                        saveActiveBrowserUser(rememberedBrowserUser);
-                        setActiveBrowserUser(rememberedBrowserUser);
-                        if (typeof window !== "undefined") {
-                          window.location.assign(`/${rememberedBrowserUser.profileSlug}`);
-                        }
-                      }}
-                    >
-                      Войти как {rememberedBrowserUser.profileDisplayName}
-                    </button>
-                  ) : null}
-                  {activeBrowserUser && (
-                    <button
-                      type="button"
-                      className="landing-browser-sign-out"
-                      onClick={handleBrowserActiveSignOut}
-                    >
-                      Выйти
-                    </button>
-                  )}
+                <section className="registration-card registration-card-primary landing-auth-resume-card">
+                  <button
+                    type="button"
+                    className="registration-submit"
+                    onClick={() => {
+                      if (!rememberedBrowserUser) return;
+                      const targetSlug = rememberedBrowserUser.profileSlug;
+                      saveActiveBrowserUser(rememberedBrowserUser);
+                      setActiveBrowserUser(rememberedBrowserUser);
+
+                      if (typeof window !== "undefined") {
+                        window.location.assign(`/${targetSlug}`);
+                      }
+                    }}
+                  >
+                    Вернуться как {landingSessionUser.profileDisplayName}
+                  </button>
                 </section>
               )}
 
-              {!activeBrowserUser &&
-                (landingAuthView === "register" ? (
-                  <RegistrationCard
-                    onBack={() => setLandingAuthView("menu")}
-                    onRegistered={(profileSlug, rememberedUser) => {
-                      setRememberedBrowserUser(rememberedUser);
-                      if (rememberedUser) {
-                        saveActiveBrowserUser(rememberedUser);
-                        setActiveBrowserUser(rememberedUser);
-                      }
-                      if (typeof window !== "undefined") {
-                        window.location.assign(`/${profileSlug}`);
-                      }
-                    }}
-                  />
-                ) : landingAuthView === "login" ? (
-                  <RecoverAccessCard
-                    onBack={() => setLandingAuthView("menu")}
-                    onRecovered={(profileSlug, rememberedUser) => {
-                      setRememberedBrowserUser(rememberedUser);
-                      if (rememberedUser) {
-                        saveActiveBrowserUser(rememberedUser);
-                        setActiveBrowserUser(rememberedUser);
-                      }
-                      if (typeof window !== "undefined") {
-                        window.location.assign(`/${profileSlug}`);
-                      }
-                    }}
-                  />
-                ) : (
-                  <section className="registration-card registration-card-primary landing-auth-entry-card">
-                    <div className="registration-card-eyebrow">Доступ</div>
-                    <h2 className="registration-card-title">Начать работу</h2>
-                    <p className="registration-card-copy">
-                      Создайте новую учётную запись или войдите в уже существующий
-                      профиль через одноразовый code.
-                    </p>
-                    <div className="landing-auth-entry-actions">
-                      <button
-                        type="button"
-                        className="registration-submit"
-                        onClick={() => setLandingAuthView("register")}
-                      >
-                        Создать учётную запись
-                      </button>
-                      <button
-                        type="button"
-                        className="registration-secondary-action"
-                        onClick={() => setLandingAuthView("login")}
-                      >
-                        Войти
-                      </button>
-                    </div>
-                  </section>
-                ))}
+              {landingSessionUser && (
+                <p className="landing-auth-or-divider" role="presentation">
+                  — или —
+                </p>
+              )}
+
+              <RecoverAccessCard
+                onRecovered={(profileSlug, rememberedUser) => {
+                  setRememberedBrowserUser(rememberedUser);
+                  if (rememberedUser) {
+                    saveActiveBrowserUser(rememberedUser);
+                    setActiveBrowserUser(rememberedUser);
+                  }
+                  void (async () => {
+                    if (personalPhotoStorageIsServerMode) {
+                      await refreshAuthenticatedUser();
+                    }
+                    if (typeof window !== "undefined") {
+                      window.location.assign(`/${profileSlug}`);
+                    }
+                  })();
+                }}
+              />
             </div>
           </div>
         </main>
@@ -2315,7 +2342,13 @@ function App() {
   return (
     <div className="page" onWheel={onWheel}>
       <header className="top-bar">
-        <h1>Timeline MVP</h1>
+        <a className="top-bar-home-link" href="/" aria-label="Go to main page">
+          <img
+            className="top-bar-home-logo"
+            src={ppyCompactLogoUrl}
+            alt="Past Present You"
+          />
+        </a>
         <div className="top-bar-right">
           <button
             type="button"
@@ -2330,14 +2363,6 @@ function App() {
             onClick={() => setLayersModalOpen(true)}
           >
             Слои
-          </button>
-          <button
-            type="button"
-            className="top-bar-btn"
-            onClick={handleRefreshTimeline}
-            disabled={ingestRefreshing}
-          >
-            {ingestRefreshing ? "Загрузка…" : "Обновить таймлайн"}
           </button>
           {canAccessAdminFunctions && (
             <button
@@ -2365,11 +2390,6 @@ function App() {
               onClick={() => {
                 if (canAddPhotoForCurrentView) setModalOpen(true);
               }}
-              title={
-                !canAddPhotoForCurrentView
-                  ? PERSONAL_SERVER_DISABLED_WRITES_MESSAGE
-                  : undefined
-              }
               disabled={!canAddPhotoForCurrentView}
             >
               + Добавить фото
@@ -2383,7 +2403,7 @@ function App() {
               Профиль: {activeProfile.displayName || `@${activeProfile.slug}`}
             </div>
           )}
-          {activeBrowserUser && (
+          {authenticatedUser && (
             <button
               type="button"
               className="top-bar-btn"
@@ -2409,13 +2429,7 @@ function App() {
           )}
           {publicServerReadOnlyUx ? (
             <div className="top-bar-note">Личный слой: только просмотр.</div>
-          ) : (
-            hasRestrictedPersonalWrites && (
-              <div className="top-bar-note">
-                {PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
-              </div>
-            )
-          )}
+          ) : null}
           <div className="scale">Масштаб: {scaleMeta[scale].label}</div>
         </div>
       </header>
@@ -2452,11 +2466,10 @@ function App() {
           onClose={() => setDataBackupModalOpen(false)}
           onImportDone={handleBackupImportDone}
           isReadOnly={!canImportBackupForCurrentView}
-          readOnlyMessage={PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
         />
       )}
 
-      {userSessionSettingsModalOpen && activeBrowserUser && (
+      {userSessionSettingsModalOpen && authenticatedUser && (
         <UserSessionSettingsModal
           onClose={() => setUserSessionSettingsModalOpen(false)}
           onSignOut={handleBrowserActiveSignOut}
@@ -2542,7 +2555,6 @@ function App() {
           allowDeleteAllPhotosInDay={canDeleteAllPhotosInDayForCurrentView}
           allowSeriesLinking={canLinkSeriesForCurrentView}
           allowSeriesUnlinking={canUnlinkSeriesForCurrentView}
-          disabledActionsMessage={PERSONAL_SERVER_DISABLED_WRITES_MESSAGE}
         />
       )}
 

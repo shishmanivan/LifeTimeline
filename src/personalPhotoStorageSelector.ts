@@ -143,8 +143,14 @@ export function getPersonalPhotoCapabilitiesForAuthenticatedUser(
   return SERVER_READ_ONLY_PERSONAL_PHOTO_CAPABILITIES;
 }
 
+export type SelectedPersonalPhotoStorageExtras = {
+  /** Server mode: invoked before each mutating storage call (throw to block). */
+  assertWriteAllowed?: () => void;
+};
+
 export function createSelectedPersonalPhotoStorage(
-  env: PersonalPhotoStorageEnv = import.meta.env as PersonalPhotoStorageEnv
+  env: PersonalPhotoStorageEnv = import.meta.env as PersonalPhotoStorageEnv,
+  extras?: SelectedPersonalPhotoStorageExtras
 ): PersonalPhotoStorage {
   const mode = getPersonalPhotoStorageMode(env);
 
@@ -152,7 +158,7 @@ export function createSelectedPersonalPhotoStorage(
     const options: ServerPersonalPhotoStorageOptions = {
       baseUrl: env.VITE_PERSONAL_PHOTO_API_BASE_URL,
       apiBasePath: env.VITE_PERSONAL_PHOTO_API_BASE_PATH,
-      writeToken: getServerPersonalWriteToken(),
+      assertWriteAllowed: extras?.assertWriteAllowed,
     };
     return createServerPersonalPhotoStorage(options);
   }

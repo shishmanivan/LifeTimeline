@@ -50,6 +50,10 @@ export type VerifyRecoveryCodeInput = {
   code: string;
 };
 
+export type GoogleAuthInput = {
+  credential: string;
+};
+
 export type RegisterUserResult = {
   user: UserModel;
   profile: ProfileModel;
