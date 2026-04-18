@@ -32,7 +32,10 @@ import {
   resolvePreparedPersonalDataDir,
   type PreparedPersonalDatasetScope,
 } from "./personalDatasetResolver";
-import { ensureIdentityStore, readIdentityStore } from "./identityStore";
+import {
+  ensureIdentityStore,
+  readIdentityStore,
+} from "./identityStore";
 import {
   registerUser,
   RegistrationError,
@@ -1193,7 +1196,7 @@ if (req.method === "GET" && profilePhotosMatch) {
 
 async function main(): Promise<void> {
   const config = getConfig();
-  await ensureIdentityStore();
+  const identityStore = await ensureIdentityStore();
   await ensurePreparedPersonalDataset(personalPreparedDatasetDir());
 
   const server = createServer((req, res) => {
@@ -1207,6 +1210,9 @@ async function main(): Promise<void> {
     const publicBaseUrl =
       config.publicBaseUrl || `http://${config.host}:${config.port}`;
     console.log(`[personal-backend] data dir: ${personalPreparedDatasetDir()}`);
+    console.log(
+      `[personal-backend] identity store: ${identityStore.storePath} (source=${identityStore.source}, init=${identityStore.initialization})`
+    );
     console.log(`[personal-backend] photos: ${publicBaseUrl}/api/personal/photos`);
     console.log(`[personal-backend] series: ${publicBaseUrl}/api/personal/series`);
     console.log(

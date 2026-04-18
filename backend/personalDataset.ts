@@ -107,16 +107,12 @@ const ALLOWED_ASSET_EXTENSIONS = new Set([
   ".jfif",
 ]);
 
-function trimTrailingSlash(value: string): string {
-  return value.replace(/\/+$/, "");
-}
-
 function buildAssetUrl(
-  publicBaseUrl: string,
+  _publicBaseUrl: string,
   kind: PersonalAssetKind,
   fileName: string
 ): string {
-  return `${trimTrailingSlash(publicBaseUrl)}/api/personal/assets/${kind}/${encodeURIComponent(fileName)}`;
+  return `/api/personal/assets/${kind}/${encodeURIComponent(fileName)}`;
 }
 
 function normalizeRelativePath(value: string): string {

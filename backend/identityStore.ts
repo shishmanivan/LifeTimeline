@@ -31,6 +31,22 @@ const DEFAULT_IDENTITY_STORE_PATH = path.resolve(
   "identity-store.json"
 );
 
+type IdentityStorePathSource =
+  | "IDENTITY_STORE_PATH"
+  | "PERSONAL_IDENTITY_STORE_PATH"
+  | "default";
+
+export type IdentityStoreLocation = {
+  storePath: string;
+  legacyStorePath: string;
+  source: IdentityStorePathSource;
+  usesConfiguredPath: boolean;
+};
+
+export type EnsureIdentityStoreResult = IdentityStoreLocation & {
+  initialization: "existing" | "migrated-from-legacy" | "created-empty";
+};
+
 function cloneProfile(profile: ProfileModel): ProfileModel {
   const ownerUserId =
     typeof profile.ownerUserId === "string" ? profile.ownerUserId : "";
@@ -86,11 +102,56 @@ function buildSeedIdentityStore(): IdentityStoreData {
 }
 
 export function getIdentityStorePath(
-  envStorePath = process.env.PERSONAL_IDENTITY_STORE_PATH
+  envStorePath =
+    process.env.IDENTITY_STORE_PATH || process.env.PERSONAL_IDENTITY_STORE_PATH
 ): string {
-  return envStorePath
-    ? path.resolve(envStorePath)
-    : DEFAULT_IDENTITY_STORE_PATH;
+  const trimmedPath = envStorePath?.trim();
+  return trimmedPath ? path.resolve(trimmedPath) : DEFAULT_IDENTITY_STORE_PATH;
+}
+
+export function getIdentityStoreLocation(): IdentityStoreLocation {
+  const explicitPath = process.env.IDENTITY_STORE_PATH?.trim();
+  if (explicitPath) {
+    return {
+      storePath: path.resolve(explicitPath),
+      legacyStorePath: DEFAULT_IDENTITY_STORE_PATH,
+      source: "IDENTITY_STORE_PATH",
+      usesConfiguredPath: true,
+    };
+  }
+
+  const legacyEnvPath = process.env.PERSONAL_IDENTITY_STORE_PATH?.trim();
+  if (legacyEnvPath) {
+    return {
+      storePath: path.resolve(legacyEnvPath),
+      legacyStorePath: DEFAULT_IDENTITY_STORE_PATH,
+      source: "PERSONAL_IDENTITY_STORE_PATH",
+      usesConfiguredPath: true,
+    };
+  }
+
+  return {
+    storePath: DEFAULT_IDENTITY_STORE_PATH,
+    legacyStorePath: DEFAULT_IDENTITY_STORE_PATH,
+    source: "default",
+    usesConfiguredPath: false,
+  };
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await readFile(filePath, "utf8");
+    return true;
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 async function writeIdentityStoreFile(
@@ -152,18 +213,74 @@ function normalizeIdentityStore(raw: unknown): IdentityStoreData {
   });
 }
 
+async function readNormalizedIdentityStoreFile(
+  storePath: string
+): Promise<{ raw: string; normalized: IdentityStoreData }> {
+  const raw = await readFile(storePath, "utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `Identity store at "${storePath}" contains invalid JSON.`,
+      { cause: error }
+    );
+  }
+  return {
+    raw,
+    normalized: normalizeIdentityStore(parsed),
+  };
+}
+
+function getLocationForStorePath(storePath: string): IdentityStoreLocation {
+  const defaultLocation = getIdentityStoreLocation();
+  const resolvedStorePath = path.resolve(storePath);
+  if (resolvedStorePath === defaultLocation.storePath) {
+    return defaultLocation;
+  }
+  return {
+    storePath: resolvedStorePath,
+    legacyStorePath: DEFAULT_IDENTITY_STORE_PATH,
+    source: "default",
+    usesConfiguredPath: false,
+  };
+}
+
 export async function ensureIdentityStore(
   storePath = getIdentityStorePath()
-): Promise<void> {
-  try {
-    const raw = await readFile(storePath, "utf8");
-    const normalized = normalizeIdentityStore(JSON.parse(raw));
+): Promise<EnsureIdentityStoreResult> {
+  const location = getLocationForStorePath(storePath);
+  if (await fileExists(location.storePath)) {
+    const { raw, normalized } = await readNormalizedIdentityStoreFile(
+      location.storePath
+    );
     if (raw.trimEnd() !== JSON.stringify(normalized, null, 2)) {
-      await writeIdentityStoreFile(storePath, normalized);
+      await writeIdentityStoreFile(location.storePath, normalized);
     }
-  } catch {
-    await writeIdentityStoreFile(storePath, buildSeedIdentityStore());
+    return {
+      ...location,
+      initialization: "existing",
+    };
   }
+
+  const shouldMigrateLegacy =
+    location.usesConfiguredPath && location.storePath !== location.legacyStorePath;
+  if (shouldMigrateLegacy && (await fileExists(location.legacyStorePath))) {
+    const { normalized } = await readNormalizedIdentityStoreFile(
+      location.legacyStorePath
+    );
+    await writeIdentityStoreFile(location.storePath, normalized);
+    return {
+      ...location,
+      initialization: "migrated-from-legacy",
+    };
+  }
+
+  await writeIdentityStoreFile(location.storePath, buildSeedIdentityStore());
+  return {
+    ...location,
+    initialization: "created-empty",
+  };
 }
 
 export async function readIdentityStore(
