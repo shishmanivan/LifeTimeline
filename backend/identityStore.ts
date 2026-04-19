@@ -25,9 +25,15 @@ export type IdentityStoreData = {
   profiles: ProfileModel[];
 };
 
-const DEFAULT_IDENTITY_STORE_PATH = path.resolve(
+const LEGACY_REPO_IDENTITY_STORE_PATH = path.resolve(
   process.cwd(),
   "FinalRez",
+  "identity-store.json"
+);
+
+const DEFAULT_IDENTITY_STORE_PATH = path.resolve(
+  process.cwd(),
+  ".runtime-data",
   "identity-store.json"
 );
 
@@ -114,7 +120,7 @@ export function getIdentityStoreLocation(): IdentityStoreLocation {
   if (explicitPath) {
     return {
       storePath: path.resolve(explicitPath),
-      legacyStorePath: DEFAULT_IDENTITY_STORE_PATH,
+      legacyStorePath: LEGACY_REPO_IDENTITY_STORE_PATH,
       source: "IDENTITY_STORE_PATH",
       usesConfiguredPath: true,
     };
@@ -124,7 +130,7 @@ export function getIdentityStoreLocation(): IdentityStoreLocation {
   if (legacyEnvPath) {
     return {
       storePath: path.resolve(legacyEnvPath),
-      legacyStorePath: DEFAULT_IDENTITY_STORE_PATH,
+      legacyStorePath: LEGACY_REPO_IDENTITY_STORE_PATH,
       source: "PERSONAL_IDENTITY_STORE_PATH",
       usesConfiguredPath: true,
     };
@@ -132,7 +138,7 @@ export function getIdentityStoreLocation(): IdentityStoreLocation {
 
   return {
     storePath: DEFAULT_IDENTITY_STORE_PATH,
-    legacyStorePath: DEFAULT_IDENTITY_STORE_PATH,
+    legacyStorePath: LEGACY_REPO_IDENTITY_STORE_PATH,
     source: "default",
     usesConfiguredPath: false,
   };
@@ -240,7 +246,7 @@ function getLocationForStorePath(storePath: string): IdentityStoreLocation {
   }
   return {
     storePath: resolvedStorePath,
-    legacyStorePath: DEFAULT_IDENTITY_STORE_PATH,
+    legacyStorePath: LEGACY_REPO_IDENTITY_STORE_PATH,
     source: "default",
     usesConfiguredPath: false,
   };
@@ -263,8 +269,7 @@ export async function ensureIdentityStore(
     };
   }
 
-  const shouldMigrateLegacy =
-    location.usesConfiguredPath && location.storePath !== location.legacyStorePath;
+  const shouldMigrateLegacy = location.storePath !== location.legacyStorePath;
   if (shouldMigrateLegacy && (await fileExists(location.legacyStorePath))) {
     const { normalized } = await readNormalizedIdentityStoreFile(
       location.legacyStorePath

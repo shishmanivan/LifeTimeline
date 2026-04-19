@@ -7,6 +7,10 @@ dist
 .DS_Store
 *.log
 
+# Runtime auth data should never live in the repo workflow
+.runtime-data/
+FinalRez/identity-store.json
+
 # History images (thousands of files, fetched by npm run history:pics)
 src/history/HistoryPics/
 
