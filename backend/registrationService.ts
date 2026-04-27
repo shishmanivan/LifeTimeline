@@ -5,6 +5,11 @@ import type {
   RegisterUserResult,
   UserModel,
 } from "../src/userModel";
+import { ensurePreparedPersonalDataset } from "./personalDataset";
+import {
+  createUserDatasetDirName,
+  resolvePreparedPersonalDataDir,
+} from "./personalDatasetResolver";
 import { updateIdentityStore } from "./identityStore";
 
 export class RegistrationError extends Error {
@@ -56,7 +61,8 @@ function createRegisteredProfile(
   profileId: string,
   displayName: string,
   slug: string,
-  ownerUserId: string
+  ownerUserId: string,
+  datasetDirName: string
 ): ProfileModel {
   return {
     id: profileId,
@@ -66,6 +72,7 @@ function createRegisteredProfile(
     availability: "public",
     personalDataset: {
       profileId,
+      dirName: datasetDirName,
     },
   };
 }
@@ -124,9 +131,16 @@ export async function registerUser(
     const slug = makeUniqueSlug(baseSlug, takenSlugs);
     const profileId = `profile-${randomUUID()}`;
     const userId = `user-${randomUUID()}`;
+    const datasetDirName = createUserDatasetDirName(userId);
     const mvpWriteAccessToken = `mvp-write-${randomUUID()}`;
 
-    const profile = createRegisteredProfile(profileId, displayName, slug, userId);
+    const profile = createRegisteredProfile(
+      profileId,
+      displayName,
+      slug,
+      userId,
+      datasetDirName
+    );
     const user = createRegisteredUser(userId, email, profile.id);
 
     store.profiles.push(profile);
@@ -137,9 +151,14 @@ export async function registerUser(
     result = { user, profile, mvpWriteAccessToken };
   });
 
-  if (!result) {
+  const completedRegistration = result as RegisterUserResult | null;
+  if (!completedRegistration) {
     throw new Error("Registration failed.");
   }
 
-  return result;
+  await ensurePreparedPersonalDataset(
+    resolvePreparedPersonalDataDir(completedRegistration.profile.personalDataset)
+  );
+
+  return completedRegistration;
 }

@@ -1,4 +1,8 @@
-import { getProfileDatasetProfileId, isProfileAvailable } from "../src/profileModel";
+import {
+  getProfileDatasetDirName,
+  getProfileDatasetProfileId,
+  isProfileAvailable,
+} from "../src/profileModel";
 import { readPreparedPhotoCountsByProfile } from "./personalDataset";
 import type { PreparedPersonalDatasetScope } from "./personalDatasetResolver";
 import { resolvePreparedPersonalDataDir } from "./personalDatasetResolver";
@@ -33,14 +37,26 @@ export function getProfileDatasetScope(
 ): PreparedPersonalDatasetScope {
   return {
     profileId: getProfileDatasetProfileId(profile),
+    dirName: getProfileDatasetDirName(profile),
   };
 }
 
 export async function listProfilesForAdmin(): Promise<readonly AdminProfile[]> {
   const store = await readIdentityStore();
   const usersById = new Map(store.users.map((user) => [user.id, user]));
-  const photoCounts = await readPreparedPhotoCountsByProfile(
-    resolvePreparedPersonalDataDir(undefined)
+  const photoCountsByProfileId = new Map<string, number>();
+
+  await Promise.all(
+    store.profiles.map(async (profile) => {
+      const datasetProfileId = getProfileDatasetProfileId(profile);
+      const counts = await readPreparedPhotoCountsByProfile(
+        resolvePreparedPersonalDataDir(getProfileDatasetScope(profile))
+      );
+      photoCountsByProfileId.set(
+        datasetProfileId,
+        counts.get(datasetProfileId) ?? 0
+      );
+    })
   );
 
   return store.profiles.map((profile) => {
@@ -50,7 +66,7 @@ export async function listProfilesForAdmin(): Promise<readonly AdminProfile[]> {
     return {
       ...profile,
       accountCreatedAt: owner?.createdAt ?? null,
-      photoCount: photoCounts.get(datasetProfileId) ?? 0,
+      photoCount: photoCountsByProfileId.get(datasetProfileId) ?? 0,
     };
   });
 }

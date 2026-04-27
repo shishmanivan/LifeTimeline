@@ -7,6 +7,11 @@ import {
   type RegisterUserResult,
   type UserModel,
 } from "../src/userModel";
+import { ensurePreparedPersonalDataset } from "./personalDataset";
+import {
+  createUserDatasetDirName,
+  resolvePreparedPersonalDataDir,
+} from "./personalDatasetResolver";
 import { updateIdentityStore, type StoredUserRecord } from "./identityStore";
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID?.trim() || "";
@@ -96,7 +101,8 @@ function createRegisteredProfile(
   profileId: string,
   displayName: string,
   slug: string,
-  ownerUserId: string
+  ownerUserId: string,
+  datasetDirName: string
 ): ProfileModel {
   return {
     id: profileId,
@@ -106,6 +112,7 @@ function createRegisteredProfile(
     availability: "public",
     personalDataset: {
       profileId,
+      dirName: datasetDirName,
     },
   };
 }
@@ -281,7 +288,14 @@ export async function authenticateWithGoogle(
       const slug = makeUniqueSlug(slugify(displayName), takenSlugs);
       const profileId = `profile-${randomUUID()}`;
       const userId = `user-${randomUUID()}`;
-      const profile = createRegisteredProfile(profileId, displayName, slug, userId);
+      const datasetDirName = createUserDatasetDirName(userId);
+      const profile = createRegisteredProfile(
+        profileId,
+        displayName,
+        slug,
+        userId,
+        datasetDirName
+      );
       const user = createRegisteredUser(
         userId,
         verified.email,
@@ -311,9 +325,14 @@ export async function authenticateWithGoogle(
     };
   });
 
-  if (!result) {
+  const completedAuthentication = result as RegisterUserResult | null;
+  if (!completedAuthentication) {
     throw new Error("Google authentication failed.");
   }
 
-  return result;
+  await ensurePreparedPersonalDataset(
+    resolvePreparedPersonalDataDir(completedAuthentication.profile.personalDataset)
+  );
+
+  return completedAuthentication;
 }

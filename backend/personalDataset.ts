@@ -108,11 +108,13 @@ const ALLOWED_ASSET_EXTENSIONS = new Set([
 ]);
 
 function buildAssetUrl(
-  _publicBaseUrl: string,
+  assetBasePath: string,
   kind: PersonalAssetKind,
   fileName: string
 ): string {
-  return `/api/personal/assets/${kind}/${encodeURIComponent(fileName)}`;
+  const normalizedBasePath =
+    assetBasePath.replace(/\/+$/, "") || "/api/personal/assets";
+  return `${normalizedBasePath}/${kind}/${encodeURIComponent(fileName)}`;
 }
 
 function normalizeRelativePath(value: string): string {

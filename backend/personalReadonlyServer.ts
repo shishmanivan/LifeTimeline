@@ -57,6 +57,7 @@ import type {
   RecoverAccessInput,
   RegisterUserInput,
   RequestRecoveryCodeInput,
+  UserModel,
   VerifyRecoveryCodeInput,
 } from "../src/userModel";
 import { getAuthenticatedUserFromRequest } from "./auth/getAuthenticatedUser";
@@ -72,6 +73,22 @@ function personalPreparedDatasetDir(
   scope?: PreparedPersonalDatasetScope
 ): string {
   return resolvePreparedPersonalDataDir(scope);
+}
+
+function personalAssetBasePath(scope?: PreparedPersonalDatasetScope): string {
+  return scope?.dirName
+    ? `/api/personal/assets/${encodeURIComponent(scope.dirName)}`
+    : "/api/personal/assets";
+}
+
+function profileDatasetDir(profile: Pick<ProfileModel, "personalDataset">): string {
+  return personalPreparedDatasetDir(getProfileDatasetScope(profile));
+}
+
+function profileAssetBasePath(
+  profile: Pick<ProfileModel, "personalDataset">
+): string {
+  return personalAssetBasePath(getProfileDatasetScope(profile));
 }
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -141,6 +158,16 @@ async function resolveProfileByAnyProfileId(
         getProfileDatasetProfileId(profile) === profileId
     ) ?? null
   );
+}
+
+async function getAuthenticatedPrimaryProfile(
+  authUser: UserModel | null
+): Promise<ProfileModel | null> {
+  return await resolveProfileByAnyProfileId(authUser?.primaryProfileId);
+}
+
+function readWriteDatasetDirForProfile(profile: ProfileModel): string {
+  return profileDatasetDir(profile);
 }
 
 function getMimeType(filePath: string): string {
@@ -863,8 +890,12 @@ async function handleRequest(
       return;
     }
 
+    const requestProfile = await getAuthenticatedPrimaryProfile(authUser);
+    const requestDataDir = requestProfile
+      ? readWriteDatasetDirForProfile(requestProfile)
+      : personalPreparedDatasetDir();
     const profileIdsInDay = await readPreparedPhotoProfileIdsInDay(
-      personalPreparedDatasetDir(),
+      requestDataDir,
       date
     );
     const targetedProfileIds = [...new Set(profileIdsInDay)];
@@ -896,7 +927,7 @@ async function handleRequest(
       return;
     }
 
-    const deletedPhotoIds = await deletePreparedPhotosInDay(personalPreparedDatasetDir(), date);
+    const deletedPhotoIds = await deletePreparedPhotosInDay(requestDataDir, date);
     sendJson(res, 200, { deletedPhotoIds });
     return;
   }
@@ -915,15 +946,17 @@ async function handleRequest(
     console.log(
       `[auth-debug] route=upsert-photo auth=${authUser ? `${authUser.id}/${authUser.role}` : "null"} targetProfileId=${targetProfile?.id ?? payload.metadata.profileId ?? "n/a"} granted=${granted}`
     );
-    if (!granted) {
+    if (!targetProfile || !granted) {
       sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
-    await savePreparedPhoto(personalPreparedDatasetDir(), payload);
+    const targetDataDir = readWriteDatasetDirForProfile(targetProfile);
+    await ensurePreparedPersonalDataset(targetDataDir);
+    await savePreparedPhoto(targetDataDir, payload);
 
     const dataset = await readPreparedPersonalDataset(
-      personalPreparedDatasetDir(),
-      getPublicBaseUrl(req, config.publicBaseUrl)
+      targetDataDir,
+      profileAssetBasePath(targetProfile)
     );
     const photo = dataset.photosResponse.photos.find((item) => item.id === photoId);
     if (!photo) {
@@ -938,8 +971,12 @@ async function handleRequest(
   const photoDeleteMatch = pathname.match(/^\/api\/personal\/photos\/([^/]+)$/);
   if (req.method === "DELETE" && photoDeleteMatch) {
     const photoId = decodeURIComponent(photoDeleteMatch[1]);
+    const requestProfile = await getAuthenticatedPrimaryProfile(authUser);
+    const requestDataDir = requestProfile
+      ? readWriteDatasetDirForProfile(requestProfile)
+      : personalPreparedDatasetDir();
     const targetProfileId = await readPreparedPhotoProfileId(
-      personalPreparedDatasetDir(),
+      requestDataDir,
       photoId
     );
     const targetProfile = await resolveProfileByAnyProfileId(targetProfileId);
@@ -951,7 +988,7 @@ async function handleRequest(
       sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
-    const deleted = await deletePreparedPhoto(personalPreparedDatasetDir(), photoId);
+    const deleted = await deletePreparedPhoto(requestDataDir, photoId);
     if (!deleted) {
       sendText(res, 404, "Photo not found.");
       return;
@@ -965,8 +1002,12 @@ async function handleRequest(
   if (req.method === "PUT" && photoImageMatch) {
     const photoId = decodeURIComponent(photoImageMatch[1]);
     const payload = await parsePhotoImageUpdateRequest(req);
+    const requestProfile = await getAuthenticatedPrimaryProfile(authUser);
+    const requestDataDir = requestProfile
+      ? readWriteDatasetDirForProfile(requestProfile)
+      : personalPreparedDatasetDir();
     const targetProfileId = await readPreparedPhotoProfileId(
-      personalPreparedDatasetDir(),
+      requestDataDir,
       photoId
     );
     const targetProfile = await resolveProfileByAnyProfileId(targetProfileId);
@@ -978,15 +1019,15 @@ async function handleRequest(
       sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
-    const updated = await replacePreparedPhotoImage(personalPreparedDatasetDir(), photoId, payload);
+    const updated = await replacePreparedPhotoImage(requestDataDir, photoId, payload);
     if (!updated) {
       sendText(res, 404, "Photo not found.");
       return;
     }
 
     const dataset = await readPreparedPersonalDataset(
-      personalPreparedDatasetDir(),
-      getPublicBaseUrl(req, config.publicBaseUrl)
+      requestDataDir,
+      targetProfile ? profileAssetBasePath(targetProfile) : personalAssetBasePath()
     );
     const photo = dataset.photosResponse.photos.find((item) => item.id === photoId);
     if (!photo) {
@@ -1004,8 +1045,12 @@ async function handleRequest(
   if (req.method === "PATCH" && metadataMatch) {
     const photoId = decodeURIComponent(metadataMatch[1]);
     const patch = parsePhotoMetadataPatch(await readJsonBody(req));
+    const requestProfile = await getAuthenticatedPrimaryProfile(authUser);
+    const requestDataDir = requestProfile
+      ? readWriteDatasetDirForProfile(requestProfile)
+      : personalPreparedDatasetDir();
     const targetProfileId = await readPreparedPhotoProfileId(
-      personalPreparedDatasetDir(),
+      requestDataDir,
       photoId
     );
     const targetProfile = await resolveProfileByAnyProfileId(targetProfileId);
@@ -1017,15 +1062,15 @@ async function handleRequest(
       sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
-    const updated = await updatePreparedPhotoMetadata(personalPreparedDatasetDir(), photoId, patch);
+    const updated = await updatePreparedPhotoMetadata(requestDataDir, photoId, patch);
     if (!updated) {
       sendText(res, 404, "Photo not found.");
       return;
     }
 
     const dataset = await readPreparedPersonalDataset(
-      personalPreparedDatasetDir(),
-      getPublicBaseUrl(req, config.publicBaseUrl)
+      requestDataDir,
+      targetProfile ? profileAssetBasePath(targetProfile) : personalAssetBasePath()
     );
     const photo = dataset.photosResponse.photos.find((item) => item.id === photoId);
     if (!photo) {
@@ -1043,8 +1088,12 @@ async function handleRequest(
   if (req.method === "PATCH" && photoSeriesMatch) {
     const photoId = decodeURIComponent(photoSeriesMatch[1]);
     const patch = parsePhotoSeriesPatch(await readJsonBody(req));
+    const requestProfile = await getAuthenticatedPrimaryProfile(authUser);
+    const requestDataDir = requestProfile
+      ? readWriteDatasetDirForProfile(requestProfile)
+      : personalPreparedDatasetDir();
     const targetProfileId = await readPreparedPhotoProfileId(
-      personalPreparedDatasetDir(),
+      requestDataDir,
       photoId
     );
     const targetProfile = await resolveProfileByAnyProfileId(targetProfileId);
@@ -1056,7 +1105,7 @@ async function handleRequest(
       sendText(res, 403, "Write access is limited to the current user's profile.");
       return;
     }
-    const result = await updatePreparedPhotoSeries(personalPreparedDatasetDir(), photoId, patch);
+    const result = await updatePreparedPhotoSeries(requestDataDir, photoId, patch);
 
     if (result === "photo-not-found") {
       sendText(res, 404, "Photo not found.");
@@ -1068,8 +1117,8 @@ async function handleRequest(
     }
 
     const dataset = await readPreparedPersonalDataset(
-      personalPreparedDatasetDir(),
-      getPublicBaseUrl(req, config.publicBaseUrl)
+      requestDataDir,
+      targetProfile ? profileAssetBasePath(targetProfile) : personalAssetBasePath()
     );
     const photo = dataset.photosResponse.photos.find((item) => item.id === photoId);
     if (!photo) {
@@ -1085,8 +1134,12 @@ async function handleRequest(
   if (req.method === "PUT" && seriesMatch) {
     const seriesId = decodeURIComponent(seriesMatch[1]);
     const series = parseSeriesRecord(await readJsonBody(req), seriesId);
+    const requestProfile = await getAuthenticatedPrimaryProfile(authUser);
+    const requestDataDir = requestProfile
+      ? readWriteDatasetDirForProfile(requestProfile)
+      : personalPreparedDatasetDir();
     const existingSeries = await readPreparedSeries(
-      personalPreparedDatasetDir(),
+      requestDataDir,
       seriesId
     );
     const targetProfileId =
@@ -1104,7 +1157,11 @@ async function handleRequest(
       ...series,
       profileId: targetProfile?.id ?? targetProfileId ?? "",
     };
-    await savePreparedSeries(personalPreparedDatasetDir(), nextSeries);
+    const targetDataDir = targetProfile
+      ? readWriteDatasetDirForProfile(targetProfile)
+      : requestDataDir;
+    await ensurePreparedPersonalDataset(targetDataDir);
+    await savePreparedSeries(targetDataDir, nextSeries);
     sendJson(res, 200, { series: nextSeries });
     return;
   }
@@ -1134,8 +1191,8 @@ if (req.method === "GET" && profilePhotosMatch) {
   }
 
   const dataset = await readPreparedPersonalDataset(
-    personalPreparedDatasetDir(getProfileDatasetScope(profile)),
-    getPublicBaseUrl(req, config.publicBaseUrl)
+    profileDatasetDir(profile),
+    profileAssetBasePath(profile)
   );
   const photos = dataset.photosResponse.photos.filter(
     (photo) => photo.profileId === profile.personalDataset.profileId
@@ -1152,20 +1209,36 @@ if (req.method === "GET" && profilePhotosMatch) {
   }
 
   if (pathname === "/api/personal/photos") {
+    const requestProfile = await getAuthenticatedPrimaryProfile(authUser);
     const dataset = await readPreparedPersonalDataset(
-      personalPreparedDatasetDir(),
-      getPublicBaseUrl(req, config.publicBaseUrl)
+      requestProfile ? profileDatasetDir(requestProfile) : personalPreparedDatasetDir(),
+      requestProfile ? profileAssetBasePath(requestProfile) : personalAssetBasePath()
     );
     sendJson(res, 200, dataset.photosResponse);
     return;
   }
 
   if (pathname === "/api/personal/series") {
+    const requestProfile = await getAuthenticatedPrimaryProfile(authUser);
     const dataset = await readPreparedPersonalDataset(
-      personalPreparedDatasetDir(),
-      getPublicBaseUrl(req, config.publicBaseUrl)
+      requestProfile ? profileDatasetDir(requestProfile) : personalPreparedDatasetDir(),
+      requestProfile ? profileAssetBasePath(requestProfile) : personalAssetBasePath()
     );
     sendJson(res, 200, dataset.seriesResponse);
+    return;
+  }
+
+  const scopedAssetMatch = pathname.match(
+    /^\/api\/personal\/assets\/([^/]+)\/(images|previews)\/([^/]+)$/
+  );
+  if (scopedAssetMatch) {
+    const [, dirName, kind, requestedFileName] = scopedAssetMatch;
+    await serveAsset(
+      res,
+      personalPreparedDatasetDir({ dirName: decodeURIComponent(dirName) }),
+      kind as PersonalAssetKind,
+      requestedFileName
+    );
     return;
   }
 

@@ -6,6 +6,11 @@ export type ProfileDatasetBinding = {
    * Keep this explicit so future profiles can diverge from the profile id if needed.
    */
   profileId: string;
+  /**
+   * Optional per-user dataset folder name under the server data root.
+   * Missing means legacy shared storage, used by the existing seeded profiles.
+   */
+  dirName?: string;
 };
 
 export type ProfileModel = {
@@ -32,4 +37,11 @@ export function getProfileDatasetProfileId(
   profile: Pick<ProfileModel, "personalDataset">
 ): string {
   return profile.personalDataset.profileId;
+}
+
+export function getProfileDatasetDirName(
+  profile: Pick<ProfileModel, "personalDataset">
+): string | undefined {
+  const dirName = profile.personalDataset.dirName?.trim();
+  return dirName || undefined;
 }

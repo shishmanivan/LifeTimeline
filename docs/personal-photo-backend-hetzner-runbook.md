@@ -25,6 +25,10 @@ Example paths:
 /etc/pastpresentyou/personal-photo-backend.env
 ```
 
+`timeline-user-data` remains the legacy shared dataset for the existing seeded
+profiles. Newly registered users get a dedicated dataset folder under
+`/srv/pastpresentyou/data`, named from their stable `user-*` id.
+
 Recommended ownership:
 - app code: deploy user
 - dataset: same user that runs backend service
@@ -70,6 +74,7 @@ Recommended:
 - `PERSONAL_PHOTO_SERVER_HOST=127.0.0.1`
 - `PERSONAL_PHOTO_SERVER_PORT=8787`
 - `PERSONAL_PHOTO_PUBLIC_BASE_URL=https://your-domain.example`
+- `PERSONAL_PHOTO_DATA_ROOT_DIR=/srv/pastpresentyou/data`
 
 ## 3. Start the backend with systemd
 
