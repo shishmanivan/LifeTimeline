@@ -15,6 +15,25 @@ const ADMIN_VIEWS: { id: AdminViewId; label: string }[] = [
   { id: "profiles", label: "Все профили" },
 ];
 
+function formatAdminDate(value?: string | null): string {
+  if (!value) return "—";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return date.toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatPhotoCount(value?: number): string {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "—";
+}
+
 export function AdminFunctionsModal({
   isOpen,
   onClose,
@@ -36,7 +55,7 @@ export function AdminFunctionsModal({
       <div
         className="modal"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 860, width: "min(92vw, 860px)" }}
+        style={{ maxWidth: 1080, width: "min(96vw, 1080px)" }}
       >
         <div
           style={{
@@ -114,7 +133,8 @@ export function AdminFunctionsModal({
                         key={profile.id}
                         style={{
                           display: "grid",
-                          gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 1.2fr) 140px auto",
+                          gridTemplateColumns:
+                            "minmax(0, 1.1fr) minmax(0, 1.2fr) 130px 150px 90px auto",
                           gap: 12,
                           alignItems: "center",
                           padding: "12px 14px",
@@ -133,6 +153,16 @@ export function AdminFunctionsModal({
                         <div>
                           <div style={{ fontSize: 12, color: "#666" }}>availability</div>
                           <div>{profile.availability}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: "#666" }}>
+                            аккаунт добавлен
+                          </div>
+                          <div>{formatAdminDate(profile.accountCreatedAt)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: "#666" }}>фото</div>
+                          <div>{formatPhotoCount(profile.photoCount)}</div>
                         </div>
                         <div style={{ justifySelf: "end" }}>
                           <a href={`/${profile.slug}`}>Открыть профиль</a>

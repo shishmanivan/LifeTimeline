@@ -31,6 +31,7 @@ type PersonalPhotoModalProps = {
     id: string,
     data: { date: string; title: string; note: string }
   ) => void;
+  onRenameSeries: (seriesId: string, title: string) => void | Promise<void>;
   onReplaceImage: (id: string, file: File) => void;
   onAddPhotoToDay: (file: File) => void;
   onNavigate: (photoId: string) => void;
@@ -76,6 +77,7 @@ export function PersonalPhotoModal({
   onClose,
   onEdit,
   onSave,
+  onRenameSeries,
   onReplaceImage,
   onAddPhotoToDay,
   onNavigate,
@@ -101,19 +103,29 @@ export function PersonalPhotoModal({
   const [draftDate, setDraftDate] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftNote, setDraftNote] = useState("");
+  const [renamingSeries, setRenamingSeries] = useState(false);
+  const [draftSeriesTitle, setDraftSeriesTitle] = useState("");
+  const [seriesGalleryOpen, setSeriesGalleryOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addPhotoInputRef = useRef<HTMLInputElement>(null);
+  const seriesTitleInputRef = useRef<HTMLInputElement>(null);
+  const photoModalContentRef = useRef<HTMLDivElement>(null);
+  const panelTouchStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleEscape = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (seriesGalleryOpen) {
+          setSeriesGalleryOpen(false);
+          return;
+        }
         if (isEditMode) {
           /* could cancel edit - for now just close */
         }
         onClose();
       }
     },
-    [onClose, isEditMode]
+    [onClose, isEditMode, seriesGalleryOpen]
   );
 
   useEffect(() => {
@@ -121,8 +133,35 @@ export function PersonalPhotoModal({
       setDraftDate(photo.date);
       setDraftTitle(photo.title);
       setDraftNote(photo.note ?? "");
+      setRenamingSeries(false);
+      setSeriesGalleryOpen(false);
     }
   }, [isOpen, photo?.id]);
+
+  useEffect(() => {
+    if (!isOpen || photosInSeries.length <= 1) {
+      setSeriesGalleryOpen(false);
+    }
+  }, [isOpen, photosInSeries.length]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!photo?.seriesId) {
+      setDraftSeriesTitle("");
+      setRenamingSeries(false);
+      return;
+    }
+    if (!renamingSeries) {
+      setDraftSeriesTitle(seriesTitle ?? "");
+    }
+  }, [isOpen, photo?.seriesId, seriesTitle, renamingSeries]);
+
+  useEffect(() => {
+    if (renamingSeries) {
+      seriesTitleInputRef.current?.focus();
+      seriesTitleInputRef.current?.select();
+    }
+  }, [renamingSeries]);
 
   useEffect(() => {
     if (isOpen) {
@@ -151,6 +190,22 @@ export function PersonalPhotoModal({
       onUnlinkFromSeries(photo.id);
     }
   }, [photo, onUnlinkFromSeries]);
+
+  const handleRenameSeriesSave = useCallback(async () => {
+    if (!photo?.seriesId) return;
+    const title = draftSeriesTitle.trim();
+    if (!title) {
+      alert("Название серии не может быть пустым.");
+      return;
+    }
+    try {
+      await onRenameSeries(photo.seriesId, title);
+      setRenamingSeries(false);
+    } catch (err) {
+      console.error("[series] rename failed", err);
+      alert("Ошибка переименования серии. Попробуйте ещё раз.");
+    }
+  }, [photo?.seriesId, draftSeriesTitle, onRenameSeries]);
 
   const handleSave = useCallback(() => {
     if (photo) {
@@ -196,6 +251,7 @@ export function PersonalPhotoModal({
     ? photosInDay.findIndex((p) => p.id === photo.id)
     : -1;
   const canCycle = photosInDay.length > 1;
+  const hasSeriesGallery = photosInSeries.length > 1;
   const hasStartedEditing =
     !!photo &&
     (draftDate !== photo.date ||
@@ -216,8 +272,54 @@ export function PersonalPhotoModal({
     if (nextPhoto) onNavigate(nextPhoto.id);
   }, [nextPhoto, onNavigate]);
 
+  const handleReadText = useCallback(() => {
+    const content = photoModalContentRef.current;
+    if (!content) return;
+    content.scrollTo({
+      left: content.clientWidth,
+      behavior: "smooth",
+    });
+  }, []);
+
+  const handleShowPhoto = useCallback(() => {
+    const content = photoModalContentRef.current;
+    if (!content) return;
+    content.scrollTo({
+      left: 0,
+      behavior: "smooth",
+    });
+  }, []);
+
+  const onPanelTouchStart = useCallback((e: React.TouchEvent) => {
+    if (!window.matchMedia("(max-width: 640px)").matches) return;
+    panelTouchStartRef.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+    };
+  }, []);
+
+  const onPanelTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      const start = panelTouchStartRef.current;
+      if (!start) return;
+      const deltaX = e.touches[0].clientX - start.x;
+      const deltaY = e.touches[0].clientY - start.y;
+      if (Math.abs(deltaX) < 72 || Math.abs(deltaX) < Math.abs(deltaY) * 1.4) {
+        return;
+      }
+      handleShowPhoto();
+      panelTouchStartRef.current = null;
+    },
+    [handleShowPhoto]
+  );
+
+  const onPanelTouchEnd = useCallback(() => {
+    panelTouchStartRef.current = null;
+  }, []);
+
   const touchStartRef = useRef<number | null>(null);
   const onTouchStart = useCallback((e: React.TouchEvent) => {
+    if (window.matchMedia("(max-width: 640px)").matches) return;
     touchStartRef.current = e.touches[0].clientX;
   }, []);
   const onTouchEnd = useCallback(() => {
@@ -225,6 +327,7 @@ export function PersonalPhotoModal({
   }, []);
   const onTouchMove = useCallback(
     (e: React.TouchEvent) => {
+      if (window.matchMedia("(max-width: 640px)").matches) return;
       if (touchStartRef.current === null) return;
       const delta = e.touches[0].clientX - touchStartRef.current;
       const threshold = 50;
@@ -392,14 +495,14 @@ export function PersonalPhotoModal({
 
   return (
     <div
-      className="personal-modal-overlay"
+      className="personal-modal-overlay personal-modal-overlay-photo"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-labelledby="personal-modal-title"
     >
       <div
-        className="personal-modal-card"
+        className="personal-modal-card personal-modal-card-photo"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -411,7 +514,7 @@ export function PersonalPhotoModal({
           ×
         </button>
 
-        <div className="personal-modal-content">
+        <div className="personal-modal-content" ref={photoModalContentRef}>
           <div
             className="personal-modal-image-wrap"
             onTouchStart={onTouchStart}
@@ -427,6 +530,24 @@ export function PersonalPhotoModal({
             ) : (
               <div className="personal-modal-image-placeholder" />
             )}
+            <div className="personal-modal-mobile-actions">
+              <button
+                type="button"
+                className="personal-modal-read-text-trigger"
+                onClick={handleReadText}
+              >
+                Читать текст
+              </button>
+              {hasSeriesGallery && (
+                <button
+                  type="button"
+                  className="personal-modal-series-mobile-trigger"
+                  onClick={() => setSeriesGalleryOpen(true)}
+                >
+                  Фото серии
+                </button>
+              )}
+            </div>
             {photosInDay.length > 1 && (
               <div className="personal-modal-nav">
                 <button
@@ -454,7 +575,12 @@ export function PersonalPhotoModal({
             )}
           </div>
 
-          <div className="personal-modal-panel">
+          <div
+            className="personal-modal-panel"
+            onTouchStart={onPanelTouchStart}
+            onTouchMove={onPanelTouchMove}
+            onTouchEnd={onPanelTouchEnd}
+          >
             {isEditMode ? (
               <>
                 <div className="personal-modal-field">
@@ -477,6 +603,59 @@ export function PersonalPhotoModal({
                     className="personal-modal-input"
                   />
                 </div>
+                {photo.seriesId && (
+                  <div className="personal-modal-field personal-modal-field-series">
+                    <label>Серия</label>
+                    {!renamingSeries ? (
+                      <div className="personal-modal-series-rename-row">
+                        <div
+                          className="personal-modal-series-name"
+                          title={seriesTitle ?? ""}
+                        >
+                          {seriesTitle ?? "Серия"}
+                        </div>
+                        <button
+                          type="button"
+                          className="personal-modal-btn personal-modal-btn-secondary"
+                          onClick={() => setRenamingSeries(true)}
+                          disabled={!allowMetadataEdit}
+                          title={!allowMetadataEdit ? disabledActionsMessage : undefined}
+                        >
+                          Переименовать серию
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <input
+                          ref={seriesTitleInputRef}
+                          type="text"
+                          value={draftSeriesTitle}
+                          onChange={(e) => setDraftSeriesTitle(e.target.value)}
+                          placeholder="Название серии"
+                          className="personal-modal-input"
+                        />
+                        <div className="personal-modal-series-rename-actions">
+                          <button
+                            type="button"
+                            className="personal-modal-btn personal-modal-btn-secondary"
+                            onClick={() => setRenamingSeries(false)}
+                          >
+                            Отмена
+                          </button>
+                          <button
+                            type="button"
+                            className="personal-modal-btn personal-modal-btn-primary"
+                            onClick={() => void handleRenameSeriesSave()}
+                            disabled={!draftSeriesTitle.trim() || !allowMetadataEdit}
+                            title={!allowMetadataEdit ? disabledActionsMessage : undefined}
+                          >
+                            Сохранить название
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 <div className="personal-modal-field personal-modal-field-note">
                   <label>Текст карточки</label>
                   <textarea
@@ -669,6 +848,70 @@ export function PersonalPhotoModal({
                   </span>
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+        {hasSeriesGallery && seriesGalleryOpen && (
+          <div
+            className="personal-modal-series-gallery"
+            aria-label="Фото серии"
+            onClick={() => setSeriesGalleryOpen(false)}
+          >
+            <div
+              className="personal-modal-series-gallery-panel"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="personal-modal-series-gallery-header">
+                <div className="personal-modal-series-gallery-heading">
+                  <div className="personal-modal-series-gallery-eyebrow">
+                    Фото серии
+                  </div>
+                  <h3 className="personal-modal-series-gallery-title">
+                    {seriesTitle ?? "Связанные фото"}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  className="personal-modal-series-gallery-close"
+                  onClick={() => setSeriesGalleryOpen(false)}
+                  aria-label="Закрыть фото серии"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="personal-modal-series-gallery-grid">
+                {photosInSeries.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`personal-modal-series-gallery-item ${p.id === photo.id ? "personal-modal-series-gallery-item-active" : ""}`}
+                    onClick={() => {
+                      if (p.id !== photo.id) onNavigate(p.id);
+                      setSeriesGalleryOpen(false);
+                    }}
+                  >
+                    <span className="personal-modal-series-gallery-image-wrap">
+                      {p.image ? (
+                        <img
+                          src={p.image}
+                          alt={p.title}
+                          className="personal-modal-series-gallery-image"
+                        />
+                      ) : (
+                        <span className="personal-modal-series-gallery-placeholder" />
+                      )}
+                    </span>
+                    <span className="personal-modal-series-gallery-meta">
+                      <span className="personal-modal-series-gallery-date">
+                        {formatSeriesDate(p.date)}
+                      </span>
+                      <span className="personal-modal-series-gallery-caption">
+                        {p.title}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}

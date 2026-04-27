@@ -2,6 +2,8 @@ import { getActiveBrowserWriteAccessToken } from "./browserUserIdentity";
 import { assignPersonalLaneIndex } from "./db";
 import type {
   PersonalPhotoStorage,
+  PhotoRecordMetadata,
+  PhotoTimelineImage,
   PhotoMetadataUpdate,
   PhotoRecord,
   SeriesRecord,
@@ -71,7 +73,10 @@ export type ServerPersonalPhotoDto = ServerPhotoFields & {
 };
 
 export type ServerSeriesDto = SeriesRecord;
-export type ServerProfileDto = ProfileModel;
+export type ServerProfileDto = ProfileModel & {
+  accountCreatedAt?: string | null;
+  photoCount?: number;
+};
 export type ListAdminProfilesResponse = {
   profiles: ServerProfileDto[];
 };
@@ -332,11 +337,34 @@ async function fetchPhotosListResponse(
 }
 
 async function readErrorText(response: Response): Promise<string> {
+  const fallback = `${response.status} ${response.statusText}`;
+  if (response.status === 413) {
+    return `${fallback}: Upload is too large for the server (likely nginx \`client_max_body_size\`).`;
+  }
   try {
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (contentType.includes("application/json")) {
+      const parsed = (await response.json()) as {
+        error?: unknown;
+        message?: unknown;
+      };
+      const errorCode = typeof parsed.error === "string" ? parsed.error : "";
+      const message = typeof parsed.message === "string" ? parsed.message : "";
+      if (errorCode && message) {
+        return `${fallback}: ${errorCode}: ${message}`;
+      }
+      if (message) {
+        return `${fallback}: ${message}`;
+      }
+      if (errorCode) {
+        return `${fallback}: ${errorCode}`;
+      }
+    }
+
     const text = await response.text();
-    return text || `${response.status} ${response.statusText}`;
+    return text ? `${fallback}: ${text}` : fallback;
   } catch {
-    return `${response.status} ${response.statusText}`;
+    return fallback;
   }
 }
 
@@ -465,6 +493,36 @@ async function serverPhotoDtoToPhotoRecord(
   };
 }
 
+function serverPhotoDtoToPhotoMetadata(dto: ServerPersonalPhotoDto): PhotoRecordMetadata {
+  return {
+    id: dto.id,
+    title: dto.title,
+    date: dto.date,
+    type: "personal",
+    profileId: dto.profileId ?? DEFAULT_PROFILE_ID,
+    offsetY: dto.offsetY,
+    offsetXDays: dto.offsetXDays,
+    laneIndex: dto.laneIndex,
+    note: dto.note,
+    showOnTimeline: dto.showOnTimeline,
+    seriesId: dto.seriesId,
+    hasPreview: !!dto.previewUrl,
+  };
+}
+
+async function serverPhotoDtoToTimelineImage(
+  dto: ServerPersonalPhotoDto,
+  fetchImpl: FetchLike
+): Promise<PhotoTimelineImage> {
+  const url = dto.previewUrl ?? dto.imageUrl;
+  const imageBlob = await fetchBlob(fetchImpl, url);
+  return {
+    imageBlob,
+    originalBlob: dto.previewUrl ? undefined : imageBlob,
+    previewBlob: dto.previewUrl ? imageBlob : undefined,
+  };
+}
+
 export function createServerPersonalPhotoStorage(
   options: ServerPersonalPhotoStorageOptions = {}
 ): PersonalPhotoStorage {
@@ -483,6 +541,20 @@ export function createServerPersonalPhotoStorage(
   };
 
   const apiUrl = (path: string) => joinApiUrl(options.baseUrl, apiBasePath, path);
+  let photoListCache: Promise<ListServerPersonalPhotosResponse> | null = null;
+
+  const getPhotoList = (): Promise<ListServerPersonalPhotosResponse> => {
+    photoListCache ??= fetchPhotosListResponse(
+      fetchImpl,
+      options.baseUrl,
+      apiBasePath
+    );
+    return photoListCache;
+  };
+
+  const clearPhotoListCache = (): void => {
+    photoListCache = null;
+  };
 
   const jsonRequest = (body: unknown): RequestInit => ({
     headers: {
@@ -495,25 +567,29 @@ export function createServerPersonalPhotoStorage(
 
   return {
     async getAllPhotos(): Promise<PhotoRecord[]> {
-      const response = await fetchPhotosListResponse(
-        fetchImpl,
-        options.baseUrl,
-        apiBasePath
-      );
+      const response = await getPhotoList();
       return await Promise.all(
         response.photos.map((photo) => serverPhotoDtoToPhotoRecord(photo, fetchImpl))
       );
     },
 
+    async getAllPhotoMetadata(): Promise<PhotoRecordMetadata[]> {
+      const response = await getPhotoList();
+      return response.photos.map(serverPhotoDtoToPhotoMetadata);
+    },
+
     async getPhoto(id: string): Promise<PhotoRecord | null> {
-      const response = await fetchPhotosListResponse(
-        fetchImpl,
-        options.baseUrl,
-        apiBasePath
-      );
+      const response = await getPhotoList();
       const photo = response.photos.find((item) => item.id === id);
       if (!photo) return null;
       return await serverPhotoDtoToPhotoRecord(photo, fetchImpl);
+    },
+
+    async getPhotoTimelineImage(id: string): Promise<PhotoTimelineImage | null> {
+      const response = await getPhotoList();
+      const photo = response.photos.find((item) => item.id === id);
+      if (!photo) return null;
+      return await serverPhotoDtoToTimelineImage(photo, fetchImpl);
     },
 
     async savePhoto(photo: PhotoRecord): Promise<void> {
@@ -529,6 +605,7 @@ export function createServerPersonalPhotoStorage(
         headers: resolveWriteAuthHeaders(),
         body: buildSavePhotoFormData(request),
       });
+      clearPhotoListCache();
     },
 
     async deletePhoto(id: string): Promise<void> {
@@ -537,6 +614,7 @@ export function createServerPersonalPhotoStorage(
         method: "DELETE",
         headers: resolveWriteAuthHeaders(),
       });
+      clearPhotoListCache();
     },
 
     async deletePhotosInDay(date: string): Promise<string[]> {
@@ -549,6 +627,7 @@ export function createServerPersonalPhotoStorage(
           headers: resolveWriteAuthHeaders(),
         }
       );
+      clearPhotoListCache();
       return response.deletedPhotoIds;
     },
 
@@ -567,6 +646,7 @@ export function createServerPersonalPhotoStorage(
           ...jsonRequest(body),
         }
       );
+      clearPhotoListCache();
     },
 
     async updatePhotoMetadata(
@@ -583,6 +663,7 @@ export function createServerPersonalPhotoStorage(
           ...jsonRequest(body),
         }
       );
+      clearPhotoListCache();
     },
 
     async updatePhotoImage(
@@ -612,6 +693,7 @@ export function createServerPersonalPhotoStorage(
         headers: resolveWriteAuthHeaders(),
         body: formData,
       });
+      clearPhotoListCache();
     },
 
     async updatePhotoPreview(id: string, previewBlob: Blob): Promise<void> {
@@ -633,6 +715,7 @@ export function createServerPersonalPhotoStorage(
           body: formData,
         }
       );
+      clearPhotoListCache();
     },
 
     async updatePhotoSeriesId(
@@ -651,6 +734,7 @@ export function createServerPersonalPhotoStorage(
           ...jsonRequest(body),
         }
       );
+      clearPhotoListCache();
     },
 
     async getAllSeries(): Promise<SeriesRecord[]> {

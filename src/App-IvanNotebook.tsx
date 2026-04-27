@@ -109,6 +109,7 @@ function AddPhotoModal({ onClose, onSubmit }: AddPhotoModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [date, setDate] = useState(todayStr());
   const [caption, setCaption] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,17 +121,30 @@ function AddPhotoModal({ onClose, onSubmit }: AddPhotoModalProps) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <h2 className="modal-title">Добавить фото</h2>
         <form onSubmit={handleSubmit}>
           <div className="modal-field">
             <label>Файл</label>
-            <input
-              type="file"
-              accept="image/*"
-              required
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
+            <div className="modal-file-row">
+              <button
+                type="button"
+                className="modal-btn"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Выбрать файл
+              </button>
+              <div className={`modal-file-pill${file ? " is-selected" : ""}`}>
+                {file ? file.name : "Файл не выбран"}
+              </div>
+              <input
+                ref={fileInputRef}
+                className="modal-file-input"
+                type="file"
+                accept="image/*"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </div>
           </div>
           <div className="modal-field">
             <label>Дата</label>
@@ -188,7 +202,28 @@ function App() {
   const [pendingOffsets, setPendingOffsets] = useState<Record<string, Offsets>>(
     {}
   );
-  const dragRef = useRef<{ startX: number; startCenterMs: number } | null>(null);
+  const [timelinePanY, setTimelinePanY] = useState(0);
+  const timelinePanYRef = useRef(0);
+  const [timelinePanBounds, setTimelinePanBounds] = useState<{
+    min: number;
+    max: number;
+  }>({ min: 0, max: 0 });
+  const timelinePanBoundsRef = useRef<{ min: number; max: number }>({
+    min: 0,
+    max: 0,
+  });
+  const [timelineAutoCentering, setTimelineAutoCentering] = useState(false);
+  const autoCenterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idleCenterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  type TimelineDragMode = "pending" | "horizontal" | "vertical";
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    startCenterMs: number;
+    startPanY: number;
+    mode: TimelineDragMode;
+  } | null>(null);
   const cardDragRef = useRef<{
     id: string;
     startX: number;
@@ -216,6 +251,57 @@ function App() {
   const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleScrollStopRef = useRef<() => void>(() => {});
   const scale = scales[scaleIndex];
+
+  useEffect(() => {
+    timelinePanYRef.current = timelinePanY;
+  }, [timelinePanY]);
+
+  useEffect(() => {
+    timelinePanBoundsRef.current = timelinePanBounds;
+  }, [timelinePanBounds]);
+
+  const cancelAutoCenter = useCallback(() => {
+    if (autoCenterTimerRef.current) {
+      clearTimeout(autoCenterTimerRef.current);
+      autoCenterTimerRef.current = null;
+    }
+    setTimelineAutoCentering(false);
+  }, []);
+
+  const startAutoCenter = useCallback(() => {
+    cancelAutoCenter();
+    if (idleCenterTimerRef.current) {
+      clearTimeout(idleCenterTimerRef.current);
+      idleCenterTimerRef.current = null;
+    }
+    setTimelineAutoCentering(true);
+    setTimelinePanY(0);
+    autoCenterTimerRef.current = setTimeout(() => {
+      autoCenterTimerRef.current = null;
+      setTimelineAutoCentering(false);
+    }, 3100);
+  }, [cancelAutoCenter]);
+
+  const scheduleIdleCenter = useCallback(() => {
+    if (idleCenterTimerRef.current) clearTimeout(idleCenterTimerRef.current);
+    if (timelinePanYRef.current === 0) return;
+    idleCenterTimerRef.current = setTimeout(() => {
+      idleCenterTimerRef.current = null;
+      startAutoCenter();
+    }, 10_000);
+  }, [startAutoCenter]);
+
+  useEffect(() => {
+    if (!overlayPhotoId) return;
+    startAutoCenter();
+  }, [overlayPhotoId, startAutoCenter]);
+
+  useEffect(() => {
+    return () => {
+      if (autoCenterTimerRef.current) clearTimeout(autoCenterTimerRef.current);
+      if (idleCenterTimerRef.current) clearTimeout(idleCenterTimerRef.current);
+    };
+  }, []);
 
   const getActiveOffsets = (id: string): Offsets => {
     const pend = pendingOffsets[id];
@@ -856,6 +942,66 @@ function App() {
     });
   };
 
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (!el) return;
+    const raf = requestAnimationFrame(() => {
+      const rect = el.getBoundingClientRect();
+      const height = rect.height;
+      const cards = [
+        ...personalCardRefs.current.values(),
+        ...historicalCardRefs.current.values(),
+      ];
+      if (cards.length === 0 || height <= 0) {
+        setTimelinePanBounds({ min: 0, max: 0 });
+        setTimelinePanY(0);
+        return;
+      }
+      let minTop = Infinity;
+      let maxBottom = -Infinity;
+      for (const card of cards) {
+        const r = card.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        const relTop = r.top - rect.top;
+        const relBottom = r.bottom - rect.top;
+        if (relTop < minTop) minTop = relTop;
+        if (relBottom > maxBottom) maxBottom = relBottom;
+      }
+      if (!isFinite(minTop) || !isFinite(maxBottom)) {
+        setTimelinePanBounds({ min: 0, max: 0 });
+        setTimelinePanY(0);
+        return;
+      }
+
+      const paddingPx = 8;
+      const bottomOverflow = maxBottom > height - paddingPx;
+      const topOverflow = minTop < paddingPx;
+
+      let min = 0;
+      let max = 0;
+      if (bottomOverflow) {
+        min = Math.min(min, timelinePanYRef.current + (height - paddingPx - maxBottom));
+      }
+      if (topOverflow) {
+        max = Math.max(max, timelinePanYRef.current + (paddingPx - minTop));
+      }
+
+      setTimelinePanBounds({ min, max });
+      setTimelinePanY((prev) => Math.max(min, Math.min(max, prev)));
+      if (min === 0 && max === 0 && timelinePanYRef.current !== 0) {
+        startAutoCenter();
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [
+    layoutInfo,
+    positionedPersonal.length,
+    positionedHistorical.length,
+    Object.keys(pendingOffsets).length,
+    scale,
+    startAutoCenter,
+  ]);
+
   const onTimelineMouseDown: React.MouseEventHandler<HTMLDivElement> = (e) => {
     if (e.button !== 0) return;
     const target = e.target as Element;
@@ -885,10 +1031,14 @@ function App() {
       }
       return;
     }
+    cancelAutoCenter();
     setIsDragging(true);
     dragRef.current = {
       startX: e.clientX,
+      startY: e.clientY,
       startCenterMs: effectiveCenter.getTime(),
+      startPanY: timelinePanYRef.current,
+      mode: "pending",
     };
   };
 
@@ -898,19 +1048,44 @@ function App() {
     if (!el) return;
     const onMouseMove = (e: MouseEvent) => {
       if (!dragRef.current) return;
-      const { startX, startCenterMs } = dragRef.current;
-      const width = el.offsetWidth;
-      const halfRange = scaleMeta[scale].rangeDays / 2;
-      const rangeMs = halfRange * 2 * MS_IN_DAY;
+      const { startX, startY, startCenterMs, startPanY } = dragRef.current;
       const deltaX = e.clientX - startX;
-      const deltaMs = (deltaX / width) * rangeMs;
-      setCenterDate(
-        clampCenterToToday(new Date(startCenterMs - deltaMs), scale)
-      );
+      const deltaY = e.clientY - startY;
+
+      let mode = dragRef.current.mode;
+      if (mode === "pending") {
+        const absX = Math.abs(deltaX);
+        const absY = Math.abs(deltaY);
+        if (absX < 5 && absY < 5) return;
+        const { min, max } = timelinePanBoundsRef.current;
+        const canVertical = min !== 0 || max !== 0;
+        if (canVertical && absY > absX) {
+          mode = "vertical";
+        } else {
+          mode = "horizontal";
+        }
+        dragRef.current.mode = mode;
+      }
+
+      if (mode === "horizontal") {
+        const width = el.offsetWidth;
+        const halfRange = scaleMeta[scale].rangeDays / 2;
+        const rangeMs = halfRange * 2 * MS_IN_DAY;
+        const deltaMs = (deltaX / width) * rangeMs;
+        setCenterDate(
+          clampCenterToToday(new Date(startCenterMs - deltaMs), scale)
+        );
+        return;
+      }
+
+      const { min, max } = timelinePanBoundsRef.current;
+      const next = Math.max(min, Math.min(max, startPanY + deltaY));
+      setTimelinePanY(next);
     };
     const onMouseUp = () => {
       setIsDragging(false);
       dragRef.current = null;
+      scheduleIdleCenter();
     };
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
@@ -918,7 +1093,7 @@ function App() {
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
     };
-  }, [isDragging, scale]);
+  }, [cancelAutoCenter, isDragging, scale, scheduleIdleCenter]);
 
   useEffect(() => {
     if (!cardDragging || !cardDragRef.current) return;
@@ -1002,6 +1177,13 @@ function App() {
         className={`timeline ${isDragging ? "timeline-dragging" : ""}`}
         onMouseDown={onTimelineMouseDown}
       >
+        <div
+          className="timeline-pan"
+          style={{
+            transform: `translateY(${timelinePanY}px)`,
+            transition: timelineAutoCentering ? "transform 3s ease-out" : undefined,
+          }}
+        >
         <div ref={axisRef} className="axis">
           {axisTicks.map((t) => (
             <div
@@ -1067,6 +1249,7 @@ function App() {
             </div>
           </>
         )}
+        </div>
       </main>
     </div>
   );

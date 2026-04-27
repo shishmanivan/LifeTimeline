@@ -1,9 +1,16 @@
 import { getProfileDatasetProfileId, isProfileAvailable } from "../src/profileModel";
+import { readPreparedPhotoCountsByProfile } from "./personalDataset";
 import type { PreparedPersonalDatasetScope } from "./personalDatasetResolver";
+import { resolvePreparedPersonalDataDir } from "./personalDatasetResolver";
 import { readIdentityStore } from "./identityStore";
 import type { Profile } from "./profileRegistry";
 
 export type { Profile };
+
+export type AdminProfile = Profile & {
+  accountCreatedAt: string | null;
+  photoCount: number;
+};
 
 export async function getProfileBySlug(slug: string): Promise<Profile | undefined> {
   const store = await readIdentityStore();
@@ -29,7 +36,21 @@ export function getProfileDatasetScope(
   };
 }
 
-export async function listProfilesForAdmin(): Promise<readonly Profile[]> {
+export async function listProfilesForAdmin(): Promise<readonly AdminProfile[]> {
   const store = await readIdentityStore();
-  return store.profiles;
+  const usersById = new Map(store.users.map((user) => [user.id, user]));
+  const photoCounts = await readPreparedPhotoCountsByProfile(
+    resolvePreparedPersonalDataDir(undefined)
+  );
+
+  return store.profiles.map((profile) => {
+    const owner = usersById.get(profile.ownerUserId);
+    const datasetProfileId = getProfileDatasetProfileId(profile);
+
+    return {
+      ...profile,
+      accountCreatedAt: owner?.createdAt ?? null,
+      photoCount: photoCounts.get(datasetProfileId) ?? 0,
+    };
+  });
 }

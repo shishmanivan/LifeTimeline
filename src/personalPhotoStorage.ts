@@ -6,9 +6,21 @@ import type {
 
 export type { PhotoMetadataUpdate, PhotoRecord, SeriesRecord };
 
+export type PhotoRecordMetadata = Omit<PhotoRecord, "imageBlob" | "previewBlob"> & {
+  hasPreview?: boolean;
+};
+
+export type PhotoTimelineImage = {
+  imageBlob: Blob;
+  originalBlob?: Blob;
+  previewBlob?: Blob;
+};
+
 export interface PersonalPhotoStorage {
   getAllPhotos(): Promise<PhotoRecord[]>;
+  getAllPhotoMetadata(): Promise<PhotoRecordMetadata[]>;
   getPhoto(id: string): Promise<PhotoRecord | null>;
+  getPhotoTimelineImage(id: string): Promise<PhotoTimelineImage | null>;
   savePhoto(photo: PhotoRecord): Promise<void>;
   deletePhoto(id: string): Promise<void>;
   deletePhotosInDay(date: string): Promise<string[]>;

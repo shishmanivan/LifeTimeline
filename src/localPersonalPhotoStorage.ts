@@ -12,7 +12,20 @@ import {
   updatePhotoPreview,
   updatePhotoSeriesId,
 } from "./db";
-import type { PersonalPhotoStorage } from "./personalPhotoStorage";
+import type {
+  PersonalPhotoStorage,
+  PhotoRecord,
+  PhotoRecordMetadata,
+  PhotoTimelineImage,
+} from "./personalPhotoStorage";
+
+function toPhotoMetadata(record: PhotoRecord): PhotoRecordMetadata {
+  const { imageBlob: _imageBlob, previewBlob, ...metadata } = record;
+  return {
+    ...metadata,
+    hasPreview: !!previewBlob,
+  };
+}
 
 export function createLocalPersonalPhotoStorage(): PersonalPhotoStorage {
   return {
@@ -25,8 +38,27 @@ export function createLocalPersonalPhotoStorage(): PersonalPhotoStorage {
       return ids;
     },
     getAllPhotos,
+    async getAllPhotoMetadata(): Promise<PhotoRecordMetadata[]> {
+      const photos = await getAllPhotos();
+      return photos.map(toPhotoMetadata);
+    },
     getAllSeries,
     getPhoto,
+    async getPhotoTimelineImage(id: string): Promise<PhotoTimelineImage | null> {
+      const photo = await getPhoto(id);
+      if (!photo) return null;
+      if (photo.previewBlob) {
+        return {
+          imageBlob: photo.previewBlob,
+          originalBlob: photo.imageBlob,
+          previewBlob: photo.previewBlob,
+        };
+      }
+      return {
+        imageBlob: photo.imageBlob,
+        originalBlob: photo.imageBlob,
+      };
+    },
     savePhoto,
     saveSeries,
     updatePhotoImage,

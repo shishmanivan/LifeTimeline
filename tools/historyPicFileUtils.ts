@@ -83,13 +83,44 @@ export function detectFileExtension(filePath: string): string | undefined {
 export function findBestExistingFileByDate(dirPath: string, date: string): string | undefined {
   if (!fs.existsSync(dirPath)) return undefined;
 
-  const candidates = fs
-    .readdirSync(dirPath)
-    .filter((file) => file !== "_manifest.json" && file.startsWith(`${date}.`))
-    .sort((a, b) => a.localeCompare(b));
+  const matches: string[] = [];
+  for (const file of fs.readdirSync(dirPath)) {
+    if (file === "_manifest.json") continue;
+    if (file === "Work") {
+      const workDir = path.join(dirPath, "Work");
+      try {
+        if (fs.statSync(workDir).isDirectory()) {
+          for (const wf of fs.readdirSync(workDir)) {
+            if (wf.startsWith(`${date}.`)) matches.push(`Work/${wf}`);
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      continue;
+    }
+    if (file.startsWith(`${date}.`)) matches.push(file);
+  }
 
-  if (candidates.length === 0) return undefined;
-  return `${date}.jpg`;
+  if (matches.length === 0) return undefined;
+
+  const rank = (rel: string): [number, number, string] => {
+    const inWork = rel.startsWith("Work/") ? 1 : 0;
+    const base = rel.startsWith("Work/") ? rel.slice("Work/".length) : rel;
+    const ext = path.extname(base).toLowerCase();
+    const extOrder = [".jpg", ".jpeg", ".jfif", ".png", ".webp", ".avif", ".svg"].indexOf(ext);
+    return [inWork, extOrder < 0 ? 99 : extOrder, rel];
+  };
+
+  matches.sort((a, b) => {
+    const [aw, ae, as] = rank(a);
+    const [bw, be, bs] = rank(b);
+    if (aw !== bw) return aw - bw;
+    if (ae !== be) return ae - be;
+    return as.localeCompare(bs);
+  });
+
+  return matches[0];
 }
 
 function normalizeContentTypeToExtension(

@@ -277,6 +277,19 @@ export async function readPreparedPhotoProfileIdsInDay(
     .map((photo) => photo.profileId);
 }
 
+export async function readPreparedPhotoCountsByProfile(
+  dataDir: string
+): Promise<Map<string, number>> {
+  const manifest = await readPreparedManifest(dataDir);
+  const counts = new Map<string, number>();
+
+  for (const photo of manifest.photos) {
+    counts.set(photo.profileId, (counts.get(photo.profileId) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
 export async function readPreparedSeries(
   dataDir: string,
   seriesId: string

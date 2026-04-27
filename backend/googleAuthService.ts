@@ -64,6 +64,34 @@ function deriveDisplayName(email: string, candidateName: string | undefined): st
   return normalizeEmail(email).split("@")[0] ?? "Profile";
 }
 
+function getSingleUserByGoogleSubject(
+  users: readonly StoredUserRecord[],
+  googleSubject: string
+): StoredUserRecord | null {
+  const matches = users.filter((user) => user.googleSubject === googleSubject);
+  if (matches.length > 1) {
+    throw new GoogleAuthError(
+      "This Google account is linked to multiple users. Resolve the duplicate account records before signing in with Google.",
+      "conflict"
+    );
+  }
+  return matches[0] ?? null;
+}
+
+function getSingleUserByEmail(
+  users: readonly StoredUserRecord[],
+  email: string
+): StoredUserRecord | null {
+  const matches = users.filter((user) => normalizeEmail(user.email) === email);
+  if (matches.length > 1) {
+    throw new GoogleAuthError(
+      "This email matches multiple users. Use email recovery first and resolve the duplicate account records before linking Google.",
+      "conflict"
+    );
+  }
+  return matches[0] ?? null;
+}
+
 function createRegisteredProfile(
   profileId: string,
   displayName: string,
@@ -157,9 +185,13 @@ async function verifyGoogleCredential(input: GoogleAuthInput): Promise<{
     });
     payload = ticket.getPayload();
   } catch (cause) {
-    throw new GoogleAuthError("The Google credential is invalid.", "invalid-token", {
-      cause,
-    });
+    throw new GoogleAuthError(
+      "The Google credential is invalid, expired, or was issued for a different Google client.",
+      "invalid-token",
+      {
+        cause,
+      }
+    );
   }
 
   if (!payload) {
@@ -206,15 +238,25 @@ export async function authenticateWithGoogle(
   let result: RegisterUserResult | null = null;
 
   await updateIdentityStore((store) => {
-    const userByGoogleSubject = store.users.find(
-      (user) => user.googleSubject === verified.googleSubject
+    const userByGoogleSubject = getSingleUserByGoogleSubject(
+      store.users,
+      verified.googleSubject
     );
-    const userByEmail = store.users.find(
-      (user) => normalizeEmail(user.email) === verified.email
-    );
+    const userByEmail = getSingleUserByEmail(store.users, verified.email);
 
     let resolvedUser: StoredUserRecord;
     let resolvedProfile: ProfileModel | null = null;
+
+    if (
+      userByGoogleSubject &&
+      userByEmail &&
+      userByGoogleSubject.id !== userByEmail.id
+    ) {
+      throw new GoogleAuthError(
+        "This Google account conflicts with an existing account record. Sign in with email recovery for the existing account instead of auto-linking.",
+        "conflict"
+      );
+    }
 
     if (userByGoogleSubject) {
       resolvedUser = userByGoogleSubject;

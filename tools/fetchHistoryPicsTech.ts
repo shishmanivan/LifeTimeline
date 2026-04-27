@@ -6,7 +6,14 @@
  * 2. Else, if TSV `image` is provided, use it.
  * 3. Else, fetch the lead image from the English Wikipedia page.
  *
- * Usage: npm run history:pics:tech
+ * JPEG (incl. .jpeg/.jfif) is saved as `<date>.jpg` in Tech/.
+ * Other formats are saved under Tech/Work/ as `<date>.<ext>` for manual conversion.
+ *
+ * Usage:
+ *   npm run history:pics:tech
+ *   npm run history:pics:tech -- 1t.tsv 1920-01-01
+ *   npm run history:pics:tech -- 1t.tsv 1950-01-01 1989-12-31
+ *   npm run history:pics:tech -- 1t.tsv --from-line 33
  */
 
 import fs from "fs";
@@ -15,7 +22,7 @@ import { fileURLToPath } from "url";
 import {
   fetchImageAsset,
   findBestExistingFileByDate,
-  getExtensionFromUrl,
+  normalizeImageExtension,
 } from "./historyPicFileUtils";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -62,28 +69,38 @@ function eventKey(date: string, url: string): string {
   return `${date}|${normalizeUrl(url)}`;
 }
 
-function parseScopeArgs(): { fileFilter?: string; fromPhysicalLine?: number } {
-  const args = process.argv.slice(2);
-  let fileFilter: string | undefined;
+/** Args after optional `argv[2]` TSV filter (same pattern as `fetchHistoryPicsCulture.ts`). */
+function parseExtraScopeArgs(): { fromDate?: string; toDate?: string; fromPhysicalLine?: number } {
+  const args = process.argv.slice(3);
+  const isoDates: string[] = [];
   let fromPhysicalLine: number | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--from-line") {
-      const next = args[i + 1];
-      const value = Number(next);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
+      isoDates.push(arg);
+      continue;
+    }
+    if (arg === "--from-line" && args[i + 1]) {
+      const value = Number(args[i + 1]);
       if (Number.isFinite(value) && value >= 2) {
         fromPhysicalLine = Math.floor(value);
         i++;
       }
       continue;
     }
-    if (!arg.startsWith("--") && !fileFilter) {
-      fileFilter = arg;
+    const m = /^--from-line=(\d+)$/.exec(arg);
+    if (m) {
+      const value = Number(m[1]);
+      if (Number.isFinite(value) && value >= 2) fromPhysicalLine = value;
     }
   }
 
-  return { fileFilter, fromPhysicalLine };
+  return {
+    fromDate: isoDates[0],
+    toDate: isoDates[1],
+    fromPhysicalLine,
+  };
 }
 
 function parseTsv(raw: string, options?: { fromPhysicalLine?: number }): ParsedRow[] {
@@ -117,9 +134,13 @@ function parseTsv(raw: string, options?: { fromPhysicalLine?: number }): ParsedR
   return rows;
 }
 
-function filenameForDate(date: string, _ext = ".jpg"): string {
+/** Manifest-relative path under HistoryPics/Tech (forward slashes). */
+function relativeManifestImagePath(date: string, rawExt: string): string {
   if (!DATE_REGEX.test(date)) throw new Error(`Invalid date for filename: ${date}`);
-  return `${date}.jpg`;
+  const ext = normalizeImageExtension(rawExt) ?? rawExt;
+  if (!ext.startsWith(".")) throw new Error(`Invalid image extension: ${rawExt}`);
+  if (ext === ".jpg") return `${date}.jpg`;
+  return `Work/${date}${ext}`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -214,20 +235,24 @@ async function fetchWikiThumbnail(url: string): Promise<string | undefined> {
   return thumbnailUrl;
 }
 
-async function downloadAndSave(imageUrl: string, destPath: string): Promise<void> {
+async function downloadAndSaveToTech(imageUrl: string, date: string, picsDir: string): Promise<string> {
+  const { buffer, extension } = await fetchImageAsset(imageUrl);
+  const rel = relativeManifestImagePath(date, extension);
+  const destPath = path.join(picsDir, ...rel.split("/"));
   if (fs.existsSync(destPath)) {
     throw new Error(`File exists, refusing to overwrite: ${destPath}`);
   }
-  const { buffer } = await fetchImageAsset(imageUrl);
+  const dir = path.dirname(destPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(destPath, buffer, { flag: "wx" });
+  return rel;
 }
 
-async function downloadWithRetry(imageUrl: string, destPath: string): Promise<void> {
+async function downloadWithRetry(imageUrl: string, date: string, picsDir: string): Promise<string> {
   let lastErr: Error | null = null;
   for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
     try {
-      await downloadAndSave(imageUrl, destPath);
-      return;
+      return await downloadAndSaveToTech(imageUrl, date, picsDir);
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
       if (attempt < RETRY_ATTEMPTS) {
@@ -248,7 +273,8 @@ async function main(): Promise<void> {
     fs.mkdirSync(PICS_DIR, { recursive: true });
   }
 
-  const scope = parseScopeArgs();
+  const fileFilter = process.argv[2];
+  const { fromDate: fromDateArg, toDate: toDateArg, fromPhysicalLine } = parseExtraScopeArgs();
   const manifest = loadManifest();
   let manifestChanged = false;
   for (const [key, filename] of Object.entries(manifest)) {
@@ -258,13 +284,27 @@ async function main(): Promise<void> {
     }
   }
 
-  const tsvFiles = findTsvFiles(SOURCES_DIR).filter((file) =>
-    scope.fileFilter ? file === scope.fileFilter || file.endsWith(`/${scope.fileFilter}`) : true
-  );
+  let tsvFiles = findTsvFiles(SOURCES_DIR);
+  if (fileFilter) {
+    tsvFiles = tsvFiles.filter(
+      (file) => file.endsWith(fileFilter) || path.basename(file) === fileFilter || file === fileFilter
+    );
+    if (tsvFiles.length === 0) {
+      console.error(`[historypics:tech] No TSV matching: ${fileFilter}`);
+      process.exit(1);
+    }
+    console.log(`[historypics:tech] Filter: ${fileFilter} (${tsvFiles.length} file(s))\n`);
+  }
+  const parseOpts = fromPhysicalLine != null ? { fromPhysicalLine } : undefined;
   const allRows: ParsedRow[] = [];
   for (const file of tsvFiles) {
     const raw = fs.readFileSync(path.join(SOURCES_DIR, file), "utf-8");
-    allRows.push(...parseTsv(raw, { fromPhysicalLine: scope.fromPhysicalLine }));
+    allRows.push(...parseTsv(raw, parseOpts));
+  }
+  if (fromPhysicalLine != null) {
+    console.log(
+      `[historypics:tech] From physical line >= ${fromPhysicalLine} in each TSV (${allRows.length} raw row(s) before dedup)\n`
+    );
   }
 
   const deduped = new Map<string, ParsedRow>();
@@ -273,7 +313,20 @@ async function main(): Promise<void> {
     const prev = deduped.get(key);
     if (!prev || (row.image.trim() && !prev.image.trim())) deduped.set(key, row);
   }
-  const rows = Array.from(deduped.values());
+  let rows = Array.from(deduped.values());
+
+  if (fromDateArg || toDateArg) {
+    const base = (d: string) => d.replace(/_\d+$/, "");
+    if (fromDateArg) rows = rows.filter((r) => base(r.date) >= fromDateArg);
+    if (toDateArg) rows = rows.filter((r) => base(r.date) <= toDateArg);
+    const range =
+      fromDateArg && toDateArg
+        ? `${fromDateArg} … ${toDateArg}`
+        : fromDateArg
+          ? `>= ${fromDateArg}`
+          : `<= ${toDateArg}`;
+    console.log(`[historypics:tech] Date range ${range} (${rows.length} event(s) in scope)\n`);
+  }
 
   const stats = {
     totalEvents: rows.length,
@@ -337,32 +390,14 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const filename = filenameForDate(row.date, ".jpg");
-    const destPath = path.join(PICS_DIR, filename);
-
-    if (fs.existsSync(destPath)) {
-      manifest[key] = filename;
-      manifestChanged = true;
-      stats.hit++;
-      continue;
-    }
-
     try {
       if (REQUEST_DELAY_MS > 0) await sleep(REQUEST_DELAY_MS);
-      const resolvedFilename = filenameForDate(row.date, ".jpg");
-      const resolvedDestPath = path.join(PICS_DIR, resolvedFilename);
-      if (fs.existsSync(resolvedDestPath)) {
-        manifest[key] = resolvedFilename;
-        manifestChanged = true;
-        stats.hit++;
-        continue;
-      }
-      await downloadWithRetry(imageUrl, resolvedDestPath);
-      manifest[key] = resolvedFilename;
+      const savedRel = await downloadWithRetry(imageUrl, row.date, PICS_DIR);
+      manifest[key] = savedRel;
       manifestChanged = true;
       if (downloadKind === "manual") stats.downloadedManual++;
       else stats.downloaded++;
-      console.log(`[historypics:tech] saved ${resolvedFilename}`);
+      console.log(`[historypics:tech] saved ${savedRel}`);
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       console.log(`[historypics:tech] FAIL_DOWNLOAD ${key}: ${errMsg}`);

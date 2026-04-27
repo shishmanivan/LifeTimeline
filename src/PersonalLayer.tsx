@@ -24,6 +24,7 @@ type PersonalLayerProps = {
   photos: PositionedPhoto[];
   axisY: number;
   cardRefsMap: React.MutableRefObject<Map<string, HTMLDivElement>>;
+  viewportAdjustY?: Record<string, number>;
   cardDragging: string | null;
   pendingOffsets: Record<string, Offsets>;
   getActiveOffsets: (id: string) => Offsets;
@@ -46,6 +47,7 @@ export function PersonalLayer({
   photos,
   axisY,
   cardRefsMap,
+  viewportAdjustY = {},
   cardDragging,
   pendingOffsets,
   getActiveOffsets,
@@ -62,14 +64,15 @@ export function PersonalLayer({
 
   return (
     <>
-      {photos.map((photo) => {
+      {photos.filter((photo) => photo.image).map((photo) => {
         const dirty = isDirty(photo.id);
         const inEditMode = (cardDragging === photo.id && altHeld) || dirty;
         const active = getActiveOffsets(photo.id);
         const y =
           baseY -
           (photo.laneIndex ?? 0) * LANE_HEIGHT +
-          active.offsetY;
+          active.offsetY +
+          (viewportAdjustY[`p:${photo.id}`] ?? 0);
 
         const dimmed = isPhotoDimmed?.(photo.id) ?? false;
         return (

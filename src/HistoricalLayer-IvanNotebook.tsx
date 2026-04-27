@@ -13,6 +13,10 @@ function useResolvedImageUrl(
   return getLocalImageUrl?.(event);
 }
 
+function isAutosHistoricalSource(sourceFile?: string): boolean {
+  return (sourceFile ?? "").toLowerCase().replace(/\\/g, "/").includes("autos/");
+}
+
 export type PositionedHistorical = HistoricalEvent & {
   xPx: number;
   laneIndex: number;
@@ -106,6 +110,9 @@ function HistoricalCard({
 }: HistoricalCardProps) {
   const imageUrl = useResolvedImageUrl(event, getLocalImageUrl);
   const [imgLoaded, setImgLoaded] = useState(false);
+  const autosClass = isAutosHistoricalSource(event.sourceFile)
+    ? "event-historical--autos"
+    : "";
 
   if (import.meta.env.DEV) {
     const isTikTok =
@@ -127,7 +134,7 @@ function HistoricalCard({
   return (
     <article
       data-event-id={event.id}
-      className={`event event-historical ${imageUrl ? "event-photo" : ""}`}
+      className={`event event-historical ${imageUrl ? "event-photo" : ""} ${autosClass}`.trim()}
       style={{
         left: `${event.xPx}px`,
         top: `${top}px`,

@@ -9,7 +9,10 @@ import {
   loadSelectedAdminProfiles,
   personalPhotoStorageIsServerMode,
 } from "./personalPhotoStorageSelector";
-import type { PhotoRecord } from "./personalPhotoStorage";
+import type {
+  PhotoRecord,
+  PhotoRecordMetadata,
+} from "./personalPhotoStorage";
 import {
   authenticateWithGoogleViaServer,
   loadProfileForCurrentRoute,
@@ -65,6 +68,8 @@ export type { Offsets };
 type Scale = "30d" | "60d" | "90d" | "1y" | "2y" | "5y" | "10y";
 
 const scales: Scale[] = ["30d", "60d", "90d", "1y", "2y", "5y", "10y"];
+const MOBILE_MAX_SCALE: Scale = "2y";
+const MOBILE_MAX_SCALE_INDEX = scales.indexOf(MOBILE_MAX_SCALE);
 
 const scaleMeta: Record<Scale, { label: string; rangeDays: number }> = {
   "30d": { label: "30 дней", rangeDays: 30 },
@@ -82,8 +87,18 @@ const PERSONAL_BASE_Y_OFFSET = 120;
 const PERSONAL_LANE_HEIGHT = 160;
 /** Card: width 120, image 4:3 = 90, title ~40 */
 const PERSONAL_CARD_HEIGHT = 130;
+const CARD_TO_TIMELINE_DIST = AXIS_GAP - HIST_ARTICLE_OFFSET;
 const EPS = 0.01;
 const SCROLL_STOP_DEBOUNCE_MS = 200;
+const CARD_VIEWPORT_PADDING = 8;
+const CARD_VIEWPORT_ADJUST_EPS = 0.5;
+
+function isMobileTimelineViewport(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 640px)").matches
+  );
+}
 
 function hashId(id: string): number {
   let h = 0;
@@ -98,6 +113,21 @@ type AnchorPosition = "left" | "center" | "right";
 function getAnchorPosition(id: string): AnchorPosition {
   const idx = hashId(id) % 3;
   return idx === 0 ? "left" : idx === 1 ? "center" : "right";
+}
+
+function getPersonalPhotoMaxOffsetY(laneIndex: number | undefined): number {
+  return (
+    PERSONAL_BASE_Y_OFFSET +
+    (laneIndex ?? 0) * PERSONAL_LANE_HEIGHT -
+    CARD_TO_TIMELINE_DIST
+  );
+}
+
+function clampPersonalPhotoOffsetY(
+  photo: Pick<PersonalPhoto, "laneIndex"> | null,
+  offsetY: number
+): number {
+  return Math.min(offsetY, getPersonalPhotoMaxOffsetY(photo?.laneIndex));
 }
 
 const MAX_OFFSET_DAYS: Record<Scale, number> = {
@@ -140,6 +170,58 @@ type AddPhotoModalProps = {
 };
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
+const INITIAL_PERSONAL_PHOTO_RADIUS_YEARS = 5;
+
+function toPersonalPhoto(
+  record: PhotoRecordMetadata,
+  today: string,
+  image = ""
+): PersonalPhoto {
+  return {
+    id: record.id,
+    title: record.title,
+    date: record.date > today ? today : record.date,
+    image,
+    profileId: record.profileId,
+    offsetXDays: record.offsetXDays ?? 0,
+    offsetY: record.offsetY ?? 0,
+    laneIndex: record.laneIndex,
+    note: record.note,
+    showOnTimeline: record.showOnTimeline !== false,
+    seriesId: record.seriesId,
+  };
+}
+
+function getPhotoYear(record: Pick<PhotoRecordMetadata, "date">): number {
+  const year = new Date(record.date).getFullYear();
+  return Number.isFinite(year) ? year : 0;
+}
+
+function prioritizePersonalPhotoMetadata(
+  records: PhotoRecordMetadata[],
+  center: Date
+): PhotoRecordMetadata[] {
+  const centerYear = center.getFullYear();
+  return [...records].sort((a, b) => {
+    const aVisible = a.showOnTimeline !== false;
+    const bVisible = b.showOnTimeline !== false;
+    const aDistance = Math.abs(getPhotoYear(a) - centerYear);
+    const bDistance = Math.abs(getPhotoYear(b) - centerYear);
+    const aBucket = !aVisible
+      ? 2
+      : aDistance <= INITIAL_PERSONAL_PHOTO_RADIUS_YEARS
+        ? 0
+        : 1;
+    const bBucket = !bVisible
+      ? 2
+      : bDistance <= INITIAL_PERSONAL_PHOTO_RADIUS_YEARS
+        ? 0
+        : 1;
+    if (aBucket !== bBucket) return aBucket - bBucket;
+    if (aDistance !== bDistance) return aDistance - bDistance;
+    return a.date.localeCompare(b.date);
+  });
+}
 
 const LAYERS = [
   { id: "main", title: "Основные мировые события" },
@@ -149,6 +231,26 @@ const LAYERS = [
 ] as const;
 
 const TIMELINE_STATE_KEY = "timeline-mvp-state";
+
+function getGoogleAuthErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("conflict")) {
+    return "Этот email уже конфликтует с другой учетной записью. Войдите по email, чтобы восстановить доступ, вместо автоматической привязки Google.";
+  }
+  if (message.includes("email-not-verified")) {
+    return "Для входа через Google нужен подтвержденный email в аккаунте Google.";
+  }
+  if (message.includes("email-missing")) {
+    return "Google не вернул email для этого аккаунта.";
+  }
+  if (message.includes("server-misconfigured")) {
+    return "Вход через Google сейчас не настроен на сервере.";
+  }
+  if (message.includes("invalid-token")) {
+    return "Не удалось подтвердить вход через Google. Попробуйте еще раз.";
+  }
+  return "Не удалось войти через Google. Попробуйте еще раз или используйте вход по email.";
+}
 
 type PersistedTimelineState = {
   scaleIndex?: number;
@@ -200,19 +302,21 @@ type LayersModalProps = {
 function LayersModal({ visibleLayers, onToggle, onClose }: LayersModalProps) {
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <h2 className="modal-title">Слои</h2>
-        <div className="modal-field" style={{ flexDirection: "column", gap: 8 }}>
-          {LAYERS.map((layer) => (
-            <label key={layer.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={visibleLayers.has(layer.id)}
-                onChange={() => onToggle(layer.id)}
-              />
-              <span>{layer.title}</span>
-            </label>
-          ))}
+        <div className="modal-field">
+          <div className="layers-modal-list">
+            {LAYERS.map((layer) => (
+              <label key={layer.id} className="layers-modal-pill">
+                <input
+                  type="checkbox"
+                  checked={visibleLayers.has(layer.id)}
+                  onChange={() => onToggle(layer.id)}
+                />
+                <span>{layer.title}</span>
+              </label>
+            ))}
+          </div>
         </div>
         <div className="modal-actions">
           <button type="button" onClick={onClose}>
@@ -263,6 +367,7 @@ function AddPhotoModal({ onClose, onSubmit }: AddPhotoModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [date, setDate] = useState(todayStr());
   const [caption, setCaption] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -274,17 +379,30 @@ function AddPhotoModal({ onClose, onSubmit }: AddPhotoModalProps) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <h2 className="modal-title">Добавить фото</h2>
         <form onSubmit={handleSubmit}>
           <div className="modal-field">
             <label>Файл</label>
-            <input
-              type="file"
-              accept="image/*"
-              required
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
+            <div className="modal-file-row">
+              <button
+                type="button"
+                className="modal-btn"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Выбрать файл
+              </button>
+              <div className={`modal-file-pill${file ? " is-selected" : ""}`}>
+                {file ? file.name : "Файл не выбран"}
+              </div>
+              <input
+                ref={fileInputRef}
+                className="modal-file-input"
+                type="file"
+                accept="image/*"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </div>
           </div>
           <div className="modal-field">
             <label>Дата</label>
@@ -350,9 +468,10 @@ function App() {
     assignPersonalLaneIndex,
     deletePhoto,
     deletePhotosInDay,
-    getAllPhotos,
+    getAllPhotoMetadata,
     getAllSeries,
     getPhoto,
+    getPhotoTimelineImage,
     savePhoto,
     saveSeries,
     updatePhotoImage,
@@ -375,6 +494,7 @@ function App() {
     canUnlinkSeries,
     canWritePreview,
   } = personalPhotoCapabilities;
+  const loadPhotosGenerationRef = useRef(0);
   const publicServerReadOnlyUx =
     personalPhotoStorageIsServerMode && !canWrite;
   const [userSessionSettingsModalOpen, setUserSessionSettingsModalOpen] =
@@ -382,6 +502,9 @@ function App() {
   const [googleScriptStatus, setGoogleScriptStatus] = useState<
     "idle" | "loading" | "loaded" | "error"
   >("idle");
+  const [googleAuthErrorMessage, setGoogleAuthErrorMessage] = useState<string | null>(
+    null
+  );
 
   const refreshAuthenticatedUser = useCallback(async () => {
     if (!personalPhotoStorageIsServerMode) {
@@ -426,9 +549,14 @@ function App() {
 
   const [scaleIndex, setScaleIndex] = useState(() => {
     const i = persisted.scaleIndex;
-    if (typeof i === "number" && i >= 0 && i < scales.length) return i;
-    return 2;
+    const initial = typeof i === "number" && i >= 0 && i < scales.length ? i : 2;
+    return isMobileTimelineViewport()
+      ? Math.min(initial, MOBILE_MAX_SCALE_INDEX)
+      : initial;
   });
+  const [isMobileTimeline, setIsMobileTimeline] = useState(
+    isMobileTimelineViewport
+  );
   const [activeProfile, setActiveProfile] = useState<ServerProfileDto | null>(null);
   const [personalPhotos, setPersonalPhotos] = useState<PersonalPhoto[]>([]);
   const [historicalEvents, setHistoricalEvents] = useState<HistoricalEvent[]>([]);
@@ -476,9 +604,12 @@ function App() {
     useState<HistoricalEvent | null>(null);
   const [centerDate, setCenterDate] = useState(() => {
     const s = persisted.centerDate;
-    const scaleIdx = typeof persisted.scaleIndex === "number" && persisted.scaleIndex >= 0 && persisted.scaleIndex < scales.length
+    const persistedScaleIdx = typeof persisted.scaleIndex === "number" && persisted.scaleIndex >= 0 && persisted.scaleIndex < scales.length
       ? persisted.scaleIndex
       : 2;
+    const scaleIdx = isMobileTimelineViewport()
+      ? Math.min(persistedScaleIdx, MOBILE_MAX_SCALE_INDEX)
+      : persistedScaleIdx;
     const scaleForClamp = scales[scaleIdx] as Scale;
     if (typeof s === "string") {
       const d = new Date(s);
@@ -491,13 +622,32 @@ function App() {
   const [pendingOffsets, setPendingOffsets] = useState<Record<string, Offsets>>(
     {}
   );
-  const dragRef = useRef<{ startX: number; startCenterMs: number } | null>(null);
+  const [timelinePanY, setTimelinePanY] = useState(0);
+  const timelinePanYRef = useRef(0);
+  const [timelinePanBounds, setTimelinePanBounds] = useState<{
+    min: number;
+    max: number;
+  }>({ min: 0, max: 0 });
+  const timelinePanBoundsRef = useRef<{ min: number; max: number }>({
+    min: 0,
+    max: 0,
+  });
+  const [timelineAutoCentering, setTimelineAutoCentering] = useState(false);
+  const autoCenterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idleCenterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startCenterMs: number;
+  } | null>(null);
   const cardDragRef = useRef<{
     id: string;
     startX: number;
     startY: number;
     startOffsetXDays: number;
     startOffsetY: number;
+    maxOffsetY: number;
   } | null>(null);
   const cardDragLastRef = useRef<{
     offsetXDays: number;
@@ -515,6 +665,9 @@ function App() {
   const [linesData, setLinesData] = useState<
     { id: string; path: string; totalLength: number; lineVariant?: string }[]
   >([]);
+  const [cardViewportAdjustY, setCardViewportAdjustY] = useState<Record<string, number>>(
+    {}
+  );
   const [mainMarkersData, setMainMarkersData] = useState<
     { id: string; xPx: number; yAxis: number; yCardTop: number; scale: "10y" | "5y" | "small" }[]
   >([]);
@@ -539,6 +692,11 @@ function App() {
     googleScriptStatus === "loaded" &&
     typeof window !== "undefined" &&
     window.google?.accounts?.id !== undefined;
+  const googleAuthStatusMessage =
+    googleAuthErrorMessage ??
+    (hasGoogleAuthConfig() && googleScriptStatus === "error"
+      ? "Не удалось загрузить вход через Google. Обновите страницу или используйте вход по email."
+      : null);
   const {
     routeProfileSlug,
     isRootShortcut: isOwnerShortcutRoute,
@@ -589,10 +747,20 @@ function App() {
   const canUnlinkSeriesForCurrentView =
     canUnlinkSeries && canManageCurrentProfile;
   const getActiveOffsets = (id: string): Offsets => {
-    const pend = pendingOffsets[id];
-    if (pend) return pend;
     const p = personalPhotos.find((x) => x.id === id);
-    if (p) return { offsetXDays: p.offsetXDays, offsetY: p.offsetY };
+    const pend = pendingOffsets[id];
+    if (pend) {
+      return {
+        offsetXDays: pend.offsetXDays,
+        offsetY: clampPersonalPhotoOffsetY(p ?? null, pend.offsetY),
+      };
+    }
+    if (p) {
+      return {
+        offsetXDays: p.offsetXDays,
+        offsetY: clampPersonalPhotoOffsetY(p, p.offsetY),
+      };
+    }
     return { offsetXDays: 0, offsetY: 0 };
   };
 
@@ -601,71 +769,76 @@ function App() {
     if (!pend) return false;
     const p = personalPhotos.find((x) => x.id === id);
     if (!p) return true;
+    const storedOffsetY = clampPersonalPhotoOffsetY(p, p.offsetY);
     return (
       Math.abs(pend.offsetXDays - p.offsetXDays) > EPS ||
-      Math.abs(pend.offsetY - p.offsetY) > 1
+      Math.abs(pend.offsetY - storedOffsetY) > 1
     );
   };
 
   const loadPhotosFromDb = useCallback(async () => {
-    const records = await getAllPhotos();
-    const today = todayStr();
-    const photos: PersonalPhoto[] = records.map((r) => {
-      const date = r.date > today ? today : r.date;
-      const showOnTimeline = r.showOnTimeline !== false;
-      if (showOnTimeline) {
-        const image = URL.createObjectURL(r.previewBlob ?? r.imageBlob);
-        objectUrlsRef.current.set(r.id, image);
-        imageBlobsRef.current.set(r.id, r.imageBlob);
-        return {
-          id: r.id,
-          title: r.title,
-          date,
-          image,
-          offsetXDays: r.offsetXDays ?? 0,
-          offsetY: r.offsetY ?? 0,
-          laneIndex: r.laneIndex,
-          note: r.note,
-          showOnTimeline: true,
-          seriesId: r.seriesId,
-        };
-      }
-      return {
-        id: r.id,
-        title: r.title,
-        date,
-        image: "",
-        offsetXDays: r.offsetXDays ?? 0,
-        offsetY: r.offsetY ?? 0,
-        laneIndex: r.laneIndex,
-        note: r.note,
-        showOnTimeline: false,
-        seriesId: r.seriesId,
-      };
-    });
-    setPersonalPhotos(photos);
+    const generation = loadPhotosGenerationRef.current + 1;
+    loadPhotosGenerationRef.current = generation;
+    objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    objectUrlsRef.current.clear();
+    imageBlobsRef.current.clear();
 
-    /* Policy-controlled preview writes: disabled in server mode. */
-    if (canWritePreview) {
-      for (const r of records) {
-        if (r.showOnTimeline === false) continue;
-        if (r.previewBlob) continue;
-        try {
-          const previewBlob = await generatePreviewBlob(r.imageBlob);
-          await updatePhotoPreview(r.id, previewBlob);
-          const oldUrl = objectUrlsRef.current.get(r.id);
-          if (oldUrl) URL.revokeObjectURL(oldUrl);
-          const newImage = URL.createObjectURL(previewBlob);
-          objectUrlsRef.current.set(r.id, newImage);
-          setPersonalPhotos((prev) =>
-            prev.map((p) => (p.id === r.id ? { ...p, image: newImage } : p))
-          );
-        } catch {
-          /* keep original */
+    const records = await getAllPhotoMetadata();
+    if (loadPhotosGenerationRef.current !== generation) return;
+
+    const today = todayStr();
+    setPersonalPhotos(records.map((record) => toPersonalPhoto(record, today)));
+
+    const orderedRecords = prioritizePersonalPhotoMetadata(
+      records,
+      centerDateRef.current
+    );
+
+    for (const record of orderedRecords) {
+      if (loadPhotosGenerationRef.current !== generation) return;
+      if (record.showOnTimeline === false) continue;
+      try {
+        const timelineImage = await getPhotoTimelineImage(record.id);
+        if (!timelineImage || loadPhotosGenerationRef.current !== generation) {
+          continue;
         }
+
+        const imageUrl = URL.createObjectURL(timelineImage.imageBlob);
+        objectUrlsRef.current.set(record.id, imageUrl);
+        if (timelineImage.originalBlob) {
+          imageBlobsRef.current.set(record.id, timelineImage.originalBlob);
+        }
+        setPersonalPhotos((prev) =>
+          prev.map((photo) =>
+            photo.id === record.id ? { ...photo, image: imageUrl } : photo
+          )
+        );
+
+        /* Policy-controlled preview writes: disabled in server mode. */
+        if (canWritePreview && !record.hasPreview && timelineImage.originalBlob) {
+          try {
+            const previewBlob = await generatePreviewBlob(timelineImage.originalBlob);
+            if (loadPhotosGenerationRef.current !== generation) return;
+            await updatePhotoPreview(record.id, previewBlob);
+            if (loadPhotosGenerationRef.current !== generation) return;
+            const oldUrl = objectUrlsRef.current.get(record.id);
+            if (oldUrl) URL.revokeObjectURL(oldUrl);
+            const previewUrl = URL.createObjectURL(previewBlob);
+            objectUrlsRef.current.set(record.id, previewUrl);
+            setPersonalPhotos((prev) =>
+              prev.map((photo) =>
+                photo.id === record.id ? { ...photo, image: previewUrl } : photo
+              )
+            );
+          } catch {
+            /* keep original */
+          }
+        }
+      } catch {
+        /* keep unloaded */
       }
     }
-  }, [canWritePreview]);
+  }, [canWritePreview, getAllPhotoMetadata, getPhotoTimelineImage, updatePhotoPreview]);
 
   const loadSeriesMapFromStorage = useCallback(async () => {
     const series = await getAllSeries();
@@ -721,13 +894,13 @@ function App() {
             return;
           }
           googleLoginInFlightRef.current = true;
-          console.debug("Google credential received");
-          console.debug("Google credential length", response.credential.length);
+          setGoogleAuthErrorMessage(null);
           void (async () => {
             try {
               const result = await authenticateWithGoogleViaServer({
                 credential: response.credential,
               });
+              setGoogleAuthErrorMessage(null);
               const rememberedUser = saveRememberedBrowserUser(result);
               setRememberedBrowserUser(rememberedUser);
               if (rememberedUser) {
@@ -742,6 +915,7 @@ function App() {
               }
             } catch (error) {
               console.error("[auth] Google sign-in failed", error);
+              setGoogleAuthErrorMessage(getGoogleAuthErrorMessage(error));
             } finally {
               googleLoginInFlightRef.current = false;
             }
@@ -873,6 +1047,23 @@ function App() {
       cancelled = true;
     };
   }, [adminFunctionsModalOpen, canAccessAdminFunctions]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 640px)");
+    const syncMobileState = () => setIsMobileTimeline(media.matches);
+    syncMobileState();
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", syncMobileState);
+      return () => media.removeEventListener("change", syncMobileState);
+    }
+    media.addListener(syncMobileState);
+    return () => media.removeListener(syncMobileState);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileTimeline) return;
+    setScaleIndex((current) => Math.min(current, MOBILE_MAX_SCALE_INDEX));
+  }, [isMobileTimeline]);
 
   useEffect(() => {
     setCenterDate((prev) => clampCenterToToday(prev, scale));
@@ -1040,10 +1231,16 @@ function App() {
     const onMove = () => schedule();
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onMove);
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onMove);
+    document.addEventListener("pointercancel", onMove);
     return () => {
       el.removeEventListener("wheel", schedule);
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onMove);
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onMove);
+      document.removeEventListener("pointercancel", onMove);
       if (scrollStopTimerRef.current) clearTimeout(scrollStopTimerRef.current);
     };
   }, []);
@@ -1426,6 +1623,101 @@ function App() {
   }, [measureLayout]);
 
   useLayoutEffect(() => {
+    if (!layoutInfo) return;
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+
+    const tlRect = timeline.getBoundingClientRect();
+    const topLimit = CARD_VIEWPORT_PADDING;
+    const bottomLimit = layoutInfo.height - CARD_VIEWPORT_PADDING;
+    const availableHeight = bottomLimit - topLimit;
+
+    const measureDesiredAdjust = (
+      card: HTMLDivElement,
+      previousAdjust: number,
+      kind: "personal" | "historical"
+    ): number => {
+      const rect = card.getBoundingClientRect();
+      const currentTop = rect.top - tlRect.top;
+      const currentBottom = rect.bottom - tlRect.top;
+      const baseTop = currentTop - previousAdjust;
+      const baseBottom = currentBottom - previousAdjust;
+      const cardHeight = currentBottom - currentTop;
+
+      let desiredAdjust = 0;
+      if (cardHeight > availableHeight) {
+        desiredAdjust = topLimit - baseTop;
+      } else if (baseTop < topLimit) {
+        desiredAdjust = topLimit - baseTop;
+      } else if (baseBottom > bottomLimit) {
+        desiredAdjust = bottomLimit - baseBottom;
+      }
+
+      if (kind === "personal") {
+        const maxPersonalBottom = layoutInfo.axisY - CARD_TO_TIMELINE_DIST;
+        desiredAdjust = Math.min(desiredAdjust, maxPersonalBottom - baseBottom);
+      } else {
+        const minHistoricalTop = layoutInfo.axisY + CARD_TO_TIMELINE_DIST;
+        desiredAdjust = Math.max(desiredAdjust, minHistoricalTop - baseTop);
+      }
+
+      return Math.round(desiredAdjust * 10) / 10;
+    };
+
+    setCardViewportAdjustY((prev) => {
+      const next: Record<string, number> = {};
+      let changed = false;
+
+      for (const photo of positionedPersonal) {
+        const card = personalCardRefs.current.get(photo.id);
+        if (!card) continue;
+        const key = `p:${photo.id}`;
+        const desired = measureDesiredAdjust(
+          card,
+          prev[key] ?? 0,
+          "personal"
+        );
+        if (Math.abs(desired) > CARD_VIEWPORT_ADJUST_EPS) {
+          next[key] = desired;
+        }
+      }
+
+      for (const event of visiblePositionedHistorical) {
+        const card = historicalCardRefs.current.get(event.id);
+        if (!card) continue;
+        const key = `h:${event.id}`;
+        const desired = measureDesiredAdjust(
+          card,
+          prev[key] ?? 0,
+          "historical"
+        );
+        if (Math.abs(desired) > CARD_VIEWPORT_ADJUST_EPS) {
+          next[key] = desired;
+        }
+      }
+
+      const prevKeys = Object.keys(prev);
+      if (prevKeys.length !== Object.keys(next).length) {
+        changed = true;
+      } else {
+        for (const key of prevKeys) {
+          if (Math.abs((prev[key] ?? 0) - (next[key] ?? 0)) > CARD_VIEWPORT_ADJUST_EPS) {
+            changed = true;
+            break;
+          }
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [
+    layoutInfo,
+    positionedPersonal,
+    visiblePositionedHistorical,
+    cardViewportAdjustY,
+  ]);
+
+  useLayoutEffect(() => {
     const personalIds = new Set(positionedPersonal.map((p) => p.id));
     const histIds = new Set(visiblePositionedHistorical.map((e) => e.id));
     const root = timelineRef.current;
@@ -1593,6 +1885,7 @@ function App() {
     scale,
     axisDates,
     pendingOffsets,
+    cardViewportAdjustY,
     cardDragging,
     mainEventIds,
     hoveredSeriesId,
@@ -1687,13 +1980,15 @@ function App() {
     if (!canEditOffsetsForCurrentView) return;
     const pend = pendingOffsets[id];
     if (!pend) return;
+    const photo = personalPhotos.find((p) => p.id === id) ?? null;
+    const offsetY = clampPersonalPhotoOffsetY(photo, pend.offsetY);
     setCardDragging(null);
     setPersonalPhotos((prev) =>
       prev.map((p) =>
-        p.id === id ? { ...p, offsetXDays: pend.offsetXDays, offsetY: pend.offsetY } : p
+        p.id === id ? { ...p, offsetXDays: pend.offsetXDays, offsetY } : p
       )
     );
-    updatePhotoOffsets(id, pend.offsetY, pend.offsetXDays).catch(() => {});
+    updatePhotoOffsets(id, offsetY, pend.offsetXDays).catch(() => {});
     setPendingOffsets((prev) => {
       const next = { ...prev };
       delete next[id];
@@ -1846,6 +2141,35 @@ function App() {
       }
     },
     [canUnlinkSeriesForCurrentView, refreshSeriesUiState]
+  );
+
+  const handleRenameSeries = useCallback(
+    async (seriesId: string, title: string) => {
+      if (!canEditMetadataForCurrentView) return;
+      const nextTitle = title.trim();
+      if (!nextTitle) return;
+
+      try {
+        const series = await getAllSeries();
+        const existing = series.find((s) => s.id === seriesId) ?? null;
+        const profileId =
+          existing?.profileId ?? activeProfileDatasetProfileId ?? "";
+
+        await saveSeries({ id: seriesId, title: nextTitle, profileId });
+        setSeriesMap((prev) => ({ ...prev, [seriesId]: nextTitle }));
+      } catch (err) {
+        console.error("[series] rename failed", err);
+        alert(
+          "РћС€РёР±РєР° РїРµСЂРµРёРјРµРЅРѕРІР°РЅРёСЏ СЃРµСЂРёРё. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·."
+        );
+      }
+    },
+    [
+      canEditMetadataForCurrentView,
+      getAllSeries,
+      saveSeries,
+      activeProfileDatasetProfileId,
+    ]
   );
 
   const handleOverlaySave = useCallback(
@@ -2095,27 +2419,139 @@ function App() {
     }
     e.preventDefault();
     const direction = e.deltaY > 0 ? 1 : -1;
+    const maxScaleIndex = isMobileTimeline
+      ? MOBILE_MAX_SCALE_INDEX
+      : scales.length - 1;
     setScaleIndex((current) => {
       const next = current + direction;
-      if (next < 0 || next >= scales.length) return current;
+      if (next < 0 || next > maxScaleIndex) return current;
       return next;
     });
   };
 
-  const onTimelineMouseDown: React.MouseEventHandler<HTMLDivElement> = (e) => {
-    if (e.button !== 0) return;
+  useEffect(() => {
+    timelinePanYRef.current = timelinePanY;
+  }, [timelinePanY]);
+
+  useEffect(() => {
+    timelinePanBoundsRef.current = timelinePanBounds;
+  }, [timelinePanBounds]);
+
+  const cancelAutoCenter = useCallback(() => {
+    if (autoCenterTimerRef.current) {
+      clearTimeout(autoCenterTimerRef.current);
+      autoCenterTimerRef.current = null;
+    }
+    setTimelineAutoCentering(false);
+  }, []);
+
+  const startAutoCenter = useCallback(() => {
+    cancelAutoCenter();
+    if (idleCenterTimerRef.current) {
+      clearTimeout(idleCenterTimerRef.current);
+      idleCenterTimerRef.current = null;
+    }
+    setTimelineAutoCentering(true);
+    setTimelinePanY(0);
+    autoCenterTimerRef.current = setTimeout(() => {
+      autoCenterTimerRef.current = null;
+      setTimelineAutoCentering(false);
+    }, 3100);
+  }, [cancelAutoCenter]);
+
+  const scheduleIdleCenter = useCallback(() => {
+    if (idleCenterTimerRef.current) clearTimeout(idleCenterTimerRef.current);
+    if (timelinePanYRef.current === 0) return;
+    idleCenterTimerRef.current = setTimeout(() => {
+      idleCenterTimerRef.current = null;
+      startAutoCenter();
+    }, 10_000);
+  }, [startAutoCenter]);
+
+  useEffect(() => {
+    if (!overlayPhotoId) return;
+    startAutoCenter();
+  }, [overlayPhotoId, startAutoCenter]);
+
+  useEffect(() => {
+    return () => {
+      if (autoCenterTimerRef.current) clearTimeout(autoCenterTimerRef.current);
+      if (idleCenterTimerRef.current) clearTimeout(idleCenterTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (!el) return;
+    const raf = requestAnimationFrame(() => {
+      const rect = el.getBoundingClientRect();
+      const height = rect.height;
+      const cards = [
+        ...personalCardRefs.current.values(),
+        ...historicalCardRefs.current.values(),
+      ];
+      if (cards.length === 0 || height <= 0) {
+        setTimelinePanBounds({ min: 0, max: 0 });
+        setTimelinePanY(0);
+        return;
+      }
+      let minTop = Infinity;
+      let maxBottom = -Infinity;
+      for (const card of cards) {
+        const r = card.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        const relTop = r.top - rect.top;
+        const relBottom = r.bottom - rect.top;
+        if (relTop < minTop) minTop = relTop;
+        if (relBottom > maxBottom) maxBottom = relBottom;
+      }
+      if (!isFinite(minTop) || !isFinite(maxBottom)) {
+        setTimelinePanBounds({ min: 0, max: 0 });
+        setTimelinePanY(0);
+        return;
+      }
+
+      const paddingPx = 8;
+      const bottomOverflow = maxBottom > height - paddingPx;
+      const topOverflow = minTop < paddingPx;
+
+      let min = 0;
+      let max = 0;
+      if (bottomOverflow) {
+        // Drag down should reveal bottom cards (content moves up => panY becomes negative).
+        min = Math.min(min, timelinePanYRef.current + (height - paddingPx - maxBottom));
+      }
+      if (topOverflow) {
+        // Drag up should reveal top cards (content moves down => panY becomes positive).
+        max = Math.max(max, timelinePanYRef.current + (paddingPx - minTop));
+      }
+
+      setTimelinePanBounds({ min, max });
+      setTimelinePanY((prev) => Math.max(min, Math.min(max, prev)));
+      if (min === 0 && max === 0 && timelinePanYRef.current !== 0) {
+        startAutoCenter();
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [
+    layoutInfo,
+    positionedPersonal.length,
+    visiblePositionedHistorical.length,
+    Object.keys(pendingOffsets).length,
+    scale,
+    startAutoCenter,
+  ]);
+
+  const onTimelinePointerDown: React.PointerEventHandler<HTMLDivElement> = (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (!e.isPrimary) return;
     const target = e.target as Element;
-    if (target.closest(".card-image") && !e.altKey) return;
+    const photoCard = target.closest(".event-personal.event-photo");
+    if (!e.altKey && photoCard) return;
     const histCard = target.closest(".event-historical");
     if (histCard) {
-      e.preventDefault();
-      e.stopPropagation();
-      const id = histCard.getAttribute("data-event-id");
-      const ev = positionedHistorical.find((x) => x.id === id);
-      if (ev) setSelectedHistoricalEvent(ev);
       return;
     }
-    const photoCard = target.closest(".event-personal.event-photo");
     if (e.altKey && photoCard) {
       if (!canEditOffsetsForCurrentView) return;
       const id = photoCard.getAttribute("data-event-id");
@@ -2132,6 +2568,7 @@ function App() {
             startY: e.clientY,
             startOffsetXDays: active.offsetXDays,
             startOffsetY: active.offsetY,
+            maxOffsetY: getPersonalPhotoMaxOffsetY(ev.laneIndex),
           };
           cardDragLastRef.current = {
             offsetXDays: active.offsetXDays,
@@ -2141,8 +2578,11 @@ function App() {
       }
       return;
     }
+    cancelAutoCenter();
     setIsDragging(true);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     dragRef.current = {
+      pointerId: e.pointerId,
       startX: e.clientX,
       startCenterMs: effectiveCenter.getTime(),
     };
@@ -2153,29 +2593,34 @@ function App() {
     if (!isDragging) return;
     const el = timelineRef.current;
     if (!el) return;
-    const onMouseMove = (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent) => {
       if (!dragRef.current) return;
-      const { startX, startCenterMs } = dragRef.current;
+      const { pointerId, startX, startCenterMs } = dragRef.current;
+      if (e.pointerId !== pointerId) return;
+      const deltaX = e.clientX - startX;
       const width = el.offsetWidth;
       const halfRange = scaleMeta[scale].rangeDays / 2;
       const rangeMs = halfRange * 2 * MS_IN_DAY;
-      const deltaX = e.clientX - startX;
       const deltaMs = (deltaX / width) * rangeMs;
       setCenterDate(
         clampCenterToToday(new Date(startCenterMs - deltaMs), scale)
       );
     };
-    const onMouseUp = () => {
+    const onPointerUp = (e: PointerEvent) => {
+      if (dragRef.current && e.pointerId !== dragRef.current.pointerId) return;
       setIsDragging(false);
       dragRef.current = null;
+      scheduleIdleCenter();
     };
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerUp);
     return () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("pointercancel", onPointerUp);
     };
-  }, [isDragging, scale]);
+  }, [cancelAutoCenter, isDragging, scale, scheduleIdleCenter]);
 
   useEffect(() => {
     if (!cardDragging || !cardDragRef.current) return;
@@ -2185,7 +2630,7 @@ function App() {
     const rangeDays = scaleMeta[scale].rangeDays;
     const onMouseMove = (e: MouseEvent) => {
       if (!cardDragRef.current) return;
-      const { id, startX, startY, startOffsetXDays, startOffsetY } =
+      const { id, startX, startY, startOffsetXDays, startOffsetY, maxOffsetY } =
         cardDragRef.current;
       const width = el.offsetWidth;
       const deltaX = e.clientX - startX;
@@ -2196,7 +2641,7 @@ function App() {
         Math.round(
           Math.max(-maxOffset, Math.min(maxOffset, rawX)) * 10
         ) / 10;
-      const offsetY = startOffsetY + deltaY;
+      const offsetY = Math.min(maxOffsetY, startOffsetY + deltaY);
       cardDragLastRef.current = { offsetXDays, offsetY };
       setPendingOffsets((prev) => ({ ...prev, [id]: { offsetXDays, offsetY } }));
     };
@@ -2227,7 +2672,7 @@ function App() {
     const landingSessionUser = rememberedBrowserUser;
     return (
       <div
-        className="page"
+        className="page page-landing"
         style={{
           padding: 0,
           gap: 0,
@@ -2287,6 +2732,11 @@ function App() {
                   ref={googleButtonContainerRef}
                   style={{ minHeight: 40, margin: "0 0 12px" }}
                 />
+              ) : null}
+              {googleAuthStatusMessage ? (
+                <p className="registration-error" role="alert">
+                  {googleAuthStatusMessage}
+                </p>
               ) : null}
               {landingSessionUser && (
                 <section className="registration-card registration-card-primary landing-auth-resume-card">
@@ -2521,6 +2971,7 @@ function App() {
             }
           }}
           onSave={handleOverlaySave}
+          onRenameSeries={handleRenameSeries}
           onReplaceImage={handleReplaceImage}
           onAddPhotoToDay={handleAddPhotoToDay}
           onNavigate={setOverlayPhotoId}
@@ -2581,8 +3032,15 @@ function App() {
       <main
         ref={timelineRef}
         className={`timeline ${isDragging ? "timeline-dragging" : ""} ${isTimelineEraArchive ? "timeline-era-archive" : ""}`.trim()}
-        onMouseDown={onTimelineMouseDown}
+        onPointerDown={onTimelinePointerDown}
       >
+        <div
+          className="timeline-pan"
+          style={{
+            transform: `translateY(${timelinePanY}px)`,
+            transition: timelineAutoCentering ? "transform 3s ease-out" : undefined,
+          }}
+        >
         <div ref={axisRef} className="axis timelineAxis">
           {axisTicks.map((t) => (
             <div
@@ -2691,6 +3149,7 @@ function App() {
               photos={positionedPersonal}
               axisY={layoutInfo.axisY}
               cardRefsMap={personalCardRefs}
+              viewportAdjustY={cardViewportAdjustY}
               cardDragging={cardDragging}
               pendingOffsets={pendingOffsets}
               getActiveOffsets={getActiveOffsets}
@@ -2721,6 +3180,7 @@ function App() {
                 events={visiblePositionedHistorical}
                 axisY={layoutInfo.axisY}
                 cardRefsMap={historicalCardRefs}
+                viewportAdjustY={cardViewportAdjustY}
                 getLocalImageUrl={getLocalImageUrl}
                 mainEventIds={mainEventIds}
                 mainEffectMode={
@@ -2732,11 +3192,13 @@ function App() {
                 shouldAnimateMain={scale === "10y" || scale === "5y"}
                 liftedHistId={liftedHistId}
                 isTimelineEraArchive={isTimelineEraArchive}
+                onEventOpen={setSelectedHistoricalEvent}
               />
               </div>
             )}
           </>
         )}
+        </div>
       </main>
     </div>
   );

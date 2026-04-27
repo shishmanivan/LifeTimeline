@@ -4,6 +4,8 @@
 #
 # Merge with your existing `server { … }` block and keep the `/api/personal/` proxy
 # from `nginx-personal-photo-backend.conf.example`.
+# Note: for photo uploads you likely also need `client_max_body_size` (see that file),
+# otherwise nginx will return 413 for bigger images.
 #
 # Adjust `root` to wherever you upload `dist/` (contents: index.html + assets/).
 
