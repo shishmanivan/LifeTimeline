@@ -113,6 +113,12 @@ export function PersonalPhotoModal({
   const seriesTitleInputRef = useRef<HTMLInputElement>(null);
   const photoModalContentRef = useRef<HTMLDivElement>(null);
   const panelTouchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const currentSeriesIndex = photo
+    ? photosInSeries.findIndex((p) => p.id === photo.id)
+    : -1;
+  const canSetSeriesReminder = !!photo?.seriesId && currentSeriesIndex > 0;
+  const savedSeriesReminder =
+    canSetSeriesReminder && photo?.seriesReminder === true;
 
   const handleEscape = useCallback(
     (e: KeyboardEvent) => {
@@ -135,11 +141,11 @@ export function PersonalPhotoModal({
       setDraftDate(photo.date);
       setDraftTitle(photo.title);
       setDraftNote(photo.note ?? "");
-      setDraftSeriesReminder(photo.seriesReminder === true);
+      setDraftSeriesReminder(savedSeriesReminder);
       setRenamingSeries(false);
       setSeriesGalleryOpen(false);
     }
-  }, [isOpen, photo?.id]);
+  }, [isOpen, photo?.id, savedSeriesReminder]);
 
   useEffect(() => {
     if (!isOpen || photosInSeries.length <= 1) {
@@ -216,10 +222,18 @@ export function PersonalPhotoModal({
         date: draftDate,
         title: draftTitle.trim() || "Фото",
         note: draftNote,
-        seriesReminder: draftSeriesReminder,
+        seriesReminder: canSetSeriesReminder ? draftSeriesReminder : false,
       });
     }
-  }, [photo, draftDate, draftTitle, draftNote, draftSeriesReminder, onSave]);
+  }, [
+    photo,
+    draftDate,
+    draftTitle,
+    draftNote,
+    draftSeriesReminder,
+    canSetSeriesReminder,
+    onSave,
+  ]);
 
   const handleReplaceImage = useCallback(() => {
     fileInputRef.current?.click();
@@ -261,12 +275,9 @@ export function PersonalPhotoModal({
     (draftDate !== photo.date ||
       draftTitle !== photo.title ||
       draftNote !== (photo.note ?? "") ||
-      draftSeriesReminder !== (photo.seriesReminder === true));
-  const currentSeriesIndex = photo
-    ? photosInSeries.findIndex((p) => p.id === photo.id)
-    : -1;
+      draftSeriesReminder !== savedSeriesReminder);
   const seriesReminderTarget =
-    photo?.seriesReminder === true && currentSeriesIndex > 0
+    savedSeriesReminder && currentSeriesIndex > 0
       ? photosInSeries[currentSeriesIndex - 1]
       : null;
   const prevPhoto = canCycle
@@ -542,7 +553,25 @@ export function PersonalPhotoModal({
             ) : (
               <div className="personal-modal-image-placeholder" />
             )}
+            {seriesReminderTarget && !isEditMode && (
+              <button
+                type="button"
+                className="personal-modal-series-reminder personal-modal-series-reminder-photo"
+                onClick={() => onNavigate(seriesReminderTarget.id)}
+              >
+                Начало здесь
+              </button>
+            )}
             <div className="personal-modal-mobile-actions">
+              {seriesReminderTarget && !isEditMode && (
+                <button
+                  type="button"
+                  className="personal-modal-series-reminder personal-modal-series-reminder-mobile"
+                  onClick={() => onNavigate(seriesReminderTarget.id)}
+                >
+                  Начало здесь
+                </button>
+              )}
               <button
                 type="button"
                 className="personal-modal-read-text-trigger"
@@ -678,7 +707,7 @@ export function PersonalPhotoModal({
                     rows={hasStartedEditing ? 16 : 6}
                   />
                 </div>
-                {photo.seriesId && (
+                {canSetSeriesReminder && (
                   <label className="personal-modal-checkbox">
                     <input
                       type="checkbox"
@@ -815,15 +844,6 @@ export function PersonalPhotoModal({
               </>
             ) : (
               <>
-                {seriesReminderTarget && (
-                  <button
-                    type="button"
-                    className="personal-modal-series-reminder"
-                    onClick={() => onNavigate(seriesReminderTarget.id)}
-                  >
-                    Начало здесь
-                  </button>
-                )}
                 <h2 id="personal-modal-title" className="personal-modal-title">
                   {photo.title}
                 </h2>

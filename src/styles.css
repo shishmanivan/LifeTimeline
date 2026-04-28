@@ -335,6 +335,22 @@ body {
   cursor: grab;
 }
 
+.timeline-profile-notes {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  z-index: 22;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.timeline-profile-notes .top-bar-note {
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
+}
+
 .timeline-pan {
   position: absolute;
   inset: 0;
@@ -1456,6 +1472,18 @@ body {
   color: #fff;
 }
 
+.personal-modal-series-reminder-photo {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 3;
+  margin: 0;
+}
+
+.personal-modal-series-reminder-mobile {
+  display: none;
+}
+
 @keyframes personal-series-reminder-wobble {
   0%,
   78%,
@@ -2016,6 +2044,10 @@ body {
     padding: 8px 12px;
   }
 
+  .timeline-profile-notes {
+    display: none;
+  }
+
   .personal-modal-overlay-photo {
     padding: 0;
     background: #050505;
@@ -2150,11 +2182,26 @@ body {
     font-size: 22px;
   }
 
-  .personal-modal-card-photo .personal-modal-series-reminder {
-    width: 74px;
-    height: 74px;
-    margin-bottom: 14px;
-    flex: 0 0 auto;
+  .personal-modal-card-photo .personal-modal-series-reminder-photo {
+    display: none;
+  }
+
+  .personal-modal-card-photo .personal-modal-series-reminder-mobile {
+    flex: 0 0 54px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 54px;
+    height: 54px;
+    min-height: 54px;
+    margin: 0;
+    padding: 6px;
+    border-color: rgba(255, 255, 255, 0.58);
+    background: rgba(255, 255, 255, 0.92);
+    color: #111;
+    font-size: 9px;
+    line-height: 1.05;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
   }
 
   .personal-modal-card-photo .personal-modal-note-readonly {

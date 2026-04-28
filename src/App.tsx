@@ -3032,14 +3032,6 @@ function App() {
               + Добавить фото
             </button>
           )}
-          {activeProfile && (
-            <div
-              className="top-bar-note"
-              title={`@${activeProfile.slug}`}
-            >
-              Профиль: {activeProfile.displayName || `@${activeProfile.slug}`}
-            </div>
-          )}
           {authenticatedUser && (
             <button
               type="button"
@@ -3048,9 +3040,6 @@ function App() {
             >
               Настройки
             </button>
-          )}
-          {activeProfile && canManageCurrentProfile && (
-            <div className="top-bar-note top-bar-note-success">Это ваш профиль</div>
           )}
           {isMissingProfileRoute && (
             <div className="top-bar-note">
@@ -3223,6 +3212,18 @@ function App() {
         className={`timeline ${isDragging ? "timeline-dragging" : ""} ${isTimelineEraArchive ? "timeline-era-archive" : ""}`.trim()}
         onPointerDown={onTimelinePointerDown}
       >
+        {activeProfile && (
+          <div className="timeline-profile-notes">
+            <div className="top-bar-note" title={`@${activeProfile.slug}`}>
+              Профиль: {activeProfile.displayName || `@${activeProfile.slug}`}
+            </div>
+            {canManageCurrentProfile && (
+              <div className="top-bar-note top-bar-note-success">
+                Это ваш профиль
+              </div>
+            )}
+          </div>
+        )}
         <div
           className="timeline-pan"
           style={{
