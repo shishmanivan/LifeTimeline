@@ -28,6 +28,7 @@ type PreparedPhotoEntry = {
   laneIndex?: number;
   showOnTimeline?: boolean;
   seriesId?: string;
+  seriesReminder?: boolean;
   imageFile: string;
   previewFile?: string;
 };
@@ -65,6 +66,7 @@ export type PreparedPhotoMetadataPatch = {
   note?: string;
   offsetY?: number;
   offsetXDays?: number;
+  seriesReminder?: boolean;
 };
 
 export type PreparedSeriesPatch = {
@@ -162,6 +164,7 @@ function toPhotoDto(
     laneIndex: photo.laneIndex,
     showOnTimeline: photo.showOnTimeline,
     seriesId: photo.seriesId,
+    seriesReminder: photo.seriesReminder,
     imageUrl: buildAssetUrl(publicBaseUrl, "images", imageFileName),
     previewUrl: previewFileName
       ? buildAssetUrl(publicBaseUrl, "previews", previewFileName)

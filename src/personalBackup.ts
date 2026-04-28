@@ -30,6 +30,7 @@ export type BackupPhotoEntry = {
   laneIndex?: number;
   showOnTimeline?: boolean;
   seriesId?: string;
+  seriesReminder?: boolean;
   imageFile: string;
   previewFile?: string;
 };
@@ -219,6 +220,7 @@ export async function exportBackupToPickedFolder(): Promise<
         laneIndex: p.laneIndex,
         showOnTimeline: p.showOnTimeline,
         seriesId: p.seriesId,
+        seriesReminder: p.seriesReminder,
         imageFile: `images/${imageName}`,
         previewFile,
       });
@@ -298,6 +300,7 @@ export async function importBackupFromPickedFolder(): Promise<
         laneIndex: e.laneIndex,
         showOnTimeline: e.showOnTimeline,
         seriesId: e.seriesId,
+        seriesReminder: e.seriesReminder,
         note: e.note,
       });
     }
@@ -348,6 +351,7 @@ export async function exportBackupAsJsonDownload(): Promise<
         laneIndex: p.laneIndex,
         showOnTimeline: p.showOnTimeline,
         seriesId: p.seriesId,
+        seriesReminder: p.seriesReminder,
         imageMime: p.imageBlob.type || "image/jpeg",
         imageBase64,
         previewMime,
@@ -411,6 +415,7 @@ export async function importBackupFromJsonFile(
         laneIndex: e.laneIndex,
         showOnTimeline: e.showOnTimeline,
         seriesId: e.seriesId,
+        seriesReminder: e.seriesReminder,
         note: e.note,
       });
     }

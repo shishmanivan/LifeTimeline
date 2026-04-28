@@ -1,7 +1,6 @@
-date	url	image	title	lang
-2019-01-23	https://en.wikipedia.org/wiki/Venezuelan_presidential_crisis		Кризис в Венесуэле	ru
-2019-03-10	https://en.wikipedia.org/wiki/Ethiopian_Airlines_Flight_302	https://upload.wikimedia.org/wikipedia/commons/d/d2/Ethiopian_Airlines_ET-AVJ_takeoff_from_TLV_%2846461974574%29.jpg	Вторая за полгода катастрофа Boeing 737 MAX 8	ru
-2019-09-23	https://en.wikipedia.org/wiki/Speeches_of_Greta_Thunberg#How_Dare_You_(speech)		Выступление Греты Тунберг в ООН	ru
-2019-12-09	https://en.wikipedia.org/wiki/Normandy_Format		Норманская встреча	ru
-2019-03-15	https://en.wikipedia.org/wiki/Christchurch_mosque_shootings		Теракт в Крайчестере	ru	
-
+date	en_url	image	en_title	ru_title	ru_url
+2019-01-23	https://en.wikipedia.org/wiki/Venezuelan_presidential_crisis		Venezuelan presidential crisis	Кризис в Венесуэле	https://en.wikipedia.org/wiki/Venezuelan_presidential_crisis
+2019-03-10	https://en.wikipedia.org/wiki/Ethiopian_Airlines_Flight_302	https://upload.wikimedia.org/wikipedia/commons/d/d2/Ethiopian_Airlines_ET-AVJ_takeoff_from_TLV_%2846461974574%29.jpg	Ethiopian Airlines Flight 302	Вторая за полгода катастрофа Boeing 737 MAX 8	https://en.wikipedia.org/wiki/Ethiopian_Airlines_Flight_302
+2019-09-23	https://en.wikipedia.org/wiki/Speeches_of_Greta_Thunberg#How_Dare_You_(speech)		Speeches of Greta Thunberg	Выступление Греты Тунберг в ООН	https://en.wikipedia.org/wiki/Speeches_of_Greta_Thunberg#How_Dare_You_(speech)
+2019-12-09	https://en.wikipedia.org/wiki/Normandy_Format		Normandy Format	Норманская встреча	https://en.wikipedia.org/wiki/Normandy_Format
+2019-03-15	https://en.wikipedia.org/wiki/Christchurch_mosque_shootings		Christchurch mosque shootings	Теракт в Крайчестере	https://en.wikipedia.org/wiki/Christchurch_mosque_shootings

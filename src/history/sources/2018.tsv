@@ -1,6 +1,4 @@
-date	url	image	title	lang	ru_url
-2018-05-14	https://en.wikipedia.org/wiki/United_States_withdrawal_from_the_Joint_Comprehensive_Plan_of_Action		Выход США из ядерной сделки с Ираном	ru
-2018-06-12	https://en.wikipedia.org/wiki/2018_North_Korea–United_States_Singapore_Summit		Встреча Трампа с Ким Чен Ином	ru
-2018-10-18	https://en.wikipedia.org/wiki/Embassy_of_the_United_States,_Jerusalem		Перенос в Иерусалим посольства США в Израиле	ru
-
-
+date	en_url	image	en_title	ru_title	ru_url
+2018-05-14	https://en.wikipedia.org/wiki/United_States_withdrawal_from_the_Joint_Comprehensive_Plan_of_Action		United States withdrawal from the Iran nuclear deal	Выход США из ядерной сделки с Ираном	https://en.wikipedia.org/wiki/United_States_withdrawal_from_the_Joint_Comprehensive_Plan_of_Action
+2018-06-12	https://en.wikipedia.org/wiki/2018_North_Korea–United_States_Singapore_Summit		2018 North Korea–United States Singapore Summit	Встреча Трампа с Ким Чен Ином	https://en.wikipedia.org/wiki/2018_North_Korea–United_States_Singapore_Summit
+2018-10-18	https://en.wikipedia.org/wiki/Embassy_of_the_United_States,_Jerusalem		Embassy of the United States, Jerusalem	Перенос в Иерусалим посольства США в Израиле	https://en.wikipedia.org/wiki/Embassy_of_the_United_States,_Jerusalem

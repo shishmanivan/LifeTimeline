@@ -1,13 +1,8 @@
-date	url	image	title	lang	
-2008-03-08	https://en.wikipedia.org/wiki/2008_Sichuan_earthquake		Сычуаньское землетрясение (Китай)	ru	https://ru.wikipedia.org/wiki/Землетрясение_в_Сычуани_(2008)
-2008-08-01	https://en.wikipedia.org/wiki/2008_Summer_Olympics	https://upload.wikimedia.org/wikipedia/ru/1/18/Beijing_2008_Olympics_logo.svg	Летние Олимпийские игры в Пекине	ru	https://ru.wikipedia.org/wiki/Летние_Олимпийские_игры_2008
-2008-08-07	https://en.wikipedia.org/wiki/2008_South_Ossetia_war	https://upload.wikimedia.org/wikipedia/commons/6/6c/Anatoly_Lebed_12.jpg	Августовская война между Россией и Грузией	ru	https://ru.wikipedia.org/wiki/Война_в_Грузии_(2008)
-2008-09-15	https://en.wikipedia.org/wiki/2008_financial_crisis		Мировой финансовый кризис (Lehman Brothers и последующие)	ru	https://ru.wikipedia.org/wiki/Финансовый_кризис_2007–2008_годов
-2008-07-11	https://en.wikipedia.org/wiki/IPhone_3G	https://upload.wikimedia.org/wikipedia/commons/e/e6/IPhone_%26_iPhone_3G.jpg	Выход iPhone 3G	ru	https://ru.wikipedia.org/wiki/IPhone_3G
-2008-11-26	https://en.wikipedia.org/wiki/2008_Mumbai_attacks		Теракты в Мумбаи (Индия)	ru	https://ru.wikipedia.org/wiki/Теракты_в_Мумбаи_(2008)
-2008-11-04	https://en.wikipedia.org/wiki/2008_United_States_presidential_election	https://upload.wikimedia.org/wikipedia/commons/f/f9/Obama_portrait_crop.jpg	Избрание Барака Обамы президентом США	ru	https://ru.wikipedia.org/wiki/Президентские_выборы_в_США_(2008)
-
-
-
-
-
+date	en_url	image	en_title	ru_title	ru_url
+2008-03-08	https://en.wikipedia.org/wiki/2008_Sichuan_earthquake		2008 Sichuan earthquake	Сычуаньское землетрясение (Китай)	https://ru.wikipedia.org/wiki/Землетрясение_в_Сычуани_(2008)
+2008-08-01	https://en.wikipedia.org/wiki/2008_Summer_Olympics	https://upload.wikimedia.org/wikipedia/ru/1/18/Beijing_2008_Olympics_logo.svg	2008 Summer Olympics	Летние Олимпийские игры в Пекине	https://ru.wikipedia.org/wiki/%D0%9B%D0%B5%D1%82%D0%BD%D0%B8%D0%B5_%D0%9E%D0%BB%D0%B8%D0%BC%D0%BF%D0%B8%D0%B9%D1%81%D0%BA%D0%B8%D0%B5_%D0%B8%D0%B3%D1%80%D1%8B_2008
+2008-08-07	https://en.wikipedia.org/wiki/2008_South_Ossetia_war	https://upload.wikimedia.org/wikipedia/commons/6/6c/Anatoly_Lebed_12.jpg	Russo-Georgian War	Августовская война между Россией и Грузией	https://ru.wikipedia.org/wiki/Война_в_Грузии_(2008)
+2008-09-15	https://en.wikipedia.org/wiki/2008_financial_crisis		2008 financial crisis	Мировой финансовый кризис (Lehman Brothers и последующие)	https://ru.wikipedia.org/wiki/Финансовый_кризис_2007–2008_годов
+2008-07-11	https://en.wikipedia.org/wiki/IPhone_3G	https://upload.wikimedia.org/wikipedia/commons/e/e6/IPhone_%26_iPhone_3G.jpg	IPhone 3G	Выход iPhone 3G	https://ru.wikipedia.org/wiki/IPhone_3G
+2008-11-26	https://en.wikipedia.org/wiki/2008_Mumbai_attacks		2008 Mumbai attacks	Теракты в Мумбаи (Индия)	https://ru.wikipedia.org/wiki/Теракты_в_Мумбаи_(2008)
+2008-11-04	https://en.wikipedia.org/wiki/2008_United_States_presidential_election	https://upload.wikimedia.org/wikipedia/commons/f/f9/Obama_portrait_crop.jpg	2008 United States presidential election	Избрание Барака Обамы президентом США	https://ru.wikipedia.org/wiki/Президентские_выборы_в_США_(2008)

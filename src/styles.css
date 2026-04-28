@@ -331,7 +331,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  touch-action: pan-y;
+  touch-action: none;
   cursor: grab;
 }
 
@@ -1415,6 +1415,67 @@ body {
   color: #666;
 }
 
+.personal-modal-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #222;
+  cursor: pointer;
+}
+
+.personal-modal-checkbox input {
+  width: 18px;
+  height: 18px;
+  accent-color: #111;
+}
+
+.personal-modal-series-reminder {
+  align-self: flex-start;
+  width: 82px;
+  height: 82px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #111;
+  border-radius: 50%;
+  background: #fff;
+  color: #111;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+  cursor: pointer;
+  box-shadow:
+    0 10px 22px rgba(0, 0, 0, 0.14),
+    0 2px 6px rgba(0, 0, 0, 0.1);
+  animation: personal-series-reminder-wobble 3.8s ease-in-out infinite;
+}
+
+.personal-modal-series-reminder:hover {
+  background: #111;
+  color: #fff;
+}
+
+@keyframes personal-series-reminder-wobble {
+  0%,
+  78%,
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+  82% {
+    transform: rotate(-4deg) scale(1.04);
+  }
+  86% {
+    transform: rotate(4deg) scale(1.04);
+  }
+  90% {
+    transform: rotate(-2deg) scale(1.02);
+  }
+  94% {
+    transform: rotate(2deg) scale(1.02);
+  }
+}
+
 .personal-modal-input {
   padding: 8px 12px;
   font-size: 14px;
@@ -1798,21 +1859,28 @@ body {
   margin-bottom: 8px;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 640px) and (orientation: portrait) {
   .page-landing .landing-main {
     align-items: flex-start;
     min-height: 100vh;
     min-height: 100dvh;
   }
 
+  .landing-main {
+    padding: 32px 16px 48px;
+  }
+
   .landing-shell {
+    width: min(760px, 100%);
     grid-template-columns: 1fr;
     align-items: start;
+    justify-items: center;
     gap: 20px;
   }
 
   .landing-auth-column {
     justify-self: center;
+    order: 2;
     max-width: min(92vw, 420px);
     max-height: none;
     overflow: visible;
@@ -1820,7 +1888,21 @@ body {
   }
 
   .landing-visual {
+    width: 100%;
     order: 1;
+  }
+
+  .landing-owner-invite {
+    top: -10px;
+    right: -2px;
+    bottom: auto;
+    max-width: 34%;
+    transform: translateY(-10%);
+  }
+
+  .landing-owner-invite-copy {
+    max-width: 86px;
+    font-size: 12px;
   }
 }
 
@@ -2066,6 +2148,13 @@ body {
 
   .personal-modal-card-photo .personal-modal-title {
     font-size: 22px;
+  }
+
+  .personal-modal-card-photo .personal-modal-series-reminder {
+    width: 74px;
+    height: 74px;
+    margin-bottom: 14px;
+    flex: 0 0 auto;
   }
 
   .personal-modal-card-photo .personal-modal-note-readonly {

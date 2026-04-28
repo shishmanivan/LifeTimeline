@@ -12,6 +12,7 @@ export type PersonalPhoto = {
   note?: string;
   showOnTimeline?: boolean;
   seriesId?: string;
+  seriesReminder?: boolean;
 };
 
 export type PositionedPhoto = PersonalPhoto & {

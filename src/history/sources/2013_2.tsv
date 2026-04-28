@@ -1,9 +1,5 @@
-date	url	image	title	lang	ru_url
-2013-04-08	https://en.wikipedia.org/wiki/Margaret_Thatcher		Умерла Маргарет Тэтчер	ru	https://ru.wikipedia.org/wiki/Тэтчер,_Маргарет
-2013-04-15	https://en.wikipedia.org/wiki/Boston_Marathon_bombing		Теракт на Бостонском марафоне	ru	https://ru.wikipedia.org/wiki/Теракт_на_Бостонском_марафоне
-2013-04-24	https://en.wikipedia.org/wiki/Rana_Plaza_collapse		Обрушение фабрики Rana Plaza в Бангладеш	ru	https://ru.wikipedia.org/wiki/Обрушение_здания_Rana_Plaza
-2013-12-05	https://en.wikipedia.org/wiki/Nelson_Mandela		Умер Нельсон Мандела	ru	https://ru.wikipedia.org/wiki/Мандела,_Нельсон
-
-
-
-
+date	en_url	image	en_title	ru_title	ru_url
+2013-04-08	https://en.wikipedia.org/wiki/Margaret_Thatcher		Margaret Thatcher	Умерла Маргарет Тэтчер	https://ru.wikipedia.org/wiki/%D0%A2%D1%8D%D1%82%D1%87%D0%B5%D1%80,_%D0%9C%D0%B0%D1%80%D0%B3%D0%B0%D1%80%D0%B5%D1%82
+2013-04-15	https://en.wikipedia.org/wiki/Boston_Marathon_bombing		Boston Marathon bombing	Теракт на Бостонском марафоне	https://ru.wikipedia.org/wiki/Теракт_на_Бостонском_марафоне
+2013-04-24	https://en.wikipedia.org/wiki/Rana_Plaza_collapse		Rana Plaza collapse	Обрушение фабрики Rana Plaza в Бангладеш	https://ru.wikipedia.org/wiki/Обрушение_здания_Rana_Plaza
+2013-12-05	https://en.wikipedia.org/wiki/Nelson_Mandela		Nelson Mandela	Умер Нельсон Мандела	https://ru.wikipedia.org/wiki/Мандела,_Нельсон

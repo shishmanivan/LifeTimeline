@@ -59,6 +59,7 @@ type ServerPhotoFields = {
   laneIndex?: number;
   showOnTimeline?: boolean;
   seriesId?: string;
+  seriesReminder?: boolean;
 };
 
 /**
@@ -120,6 +121,7 @@ export type PatchServerPersonalPhotoMetadataRequest = {
   note?: string;
   offsetY?: number;
   offsetXDays?: number;
+  seriesReminder?: boolean;
 };
 
 export type UpdateServerPhotoSeriesRequest = {
@@ -424,6 +426,7 @@ function toServerPhotoFields(photo: PhotoRecord): ServerPhotoFields {
     laneIndex: photo.laneIndex,
     showOnTimeline: photo.showOnTimeline,
     seriesId: photo.seriesId,
+    seriesReminder: photo.seriesReminder,
   };
 }
 
@@ -490,6 +493,7 @@ async function serverPhotoDtoToPhotoRecord(
     note: dto.note,
     showOnTimeline: dto.showOnTimeline,
     seriesId: dto.seriesId,
+    seriesReminder: dto.seriesReminder,
   };
 }
 
@@ -506,6 +510,7 @@ function serverPhotoDtoToPhotoMetadata(dto: ServerPersonalPhotoDto): PhotoRecord
     note: dto.note,
     showOnTimeline: dto.showOnTimeline,
     seriesId: dto.seriesId,
+    seriesReminder: dto.seriesReminder,
     hasPreview: !!dto.previewUrl,
   };
 }

@@ -189,6 +189,7 @@ function toPersonalPhoto(
     note: record.note,
     showOnTimeline: record.showOnTimeline !== false,
     seriesId: record.seriesId,
+    seriesReminder: record.seriesReminder,
   };
 }
 
@@ -229,6 +230,25 @@ const LAYERS = [
   { id: "autos", title: "Автомобили" },
   { id: "tech", title: "Техника и технологии" },
 ] as const;
+
+type LayerId = (typeof LAYERS)[number]["id"];
+
+function isSingleLayerScale(scale: Scale): boolean {
+  return scale === "2y" || scale === "5y" || scale === "10y";
+}
+
+function getHighestPriorityLayerId(layers: Set<string>): LayerId {
+  return LAYERS.find((layer) => layers.has(layer.id))?.id ?? LAYERS[0].id;
+}
+
+function normalizeVisibleLayersForScale(
+  layers: Set<string>,
+  scale: Scale
+): Set<string> {
+  if (!isSingleLayerScale(scale)) return layers;
+  if (layers.size === 0) return layers;
+  return new Set([getHighestPriorityLayerId(layers)]);
+}
 
 const TIMELINE_STATE_KEY = "timeline-mvp-state";
 
@@ -567,6 +587,9 @@ function App() {
   } | null>(null);
   const objectUrlsRef = useRef<Map<string, string>>(new Map());
   const imageBlobsRef = useRef<Map<string, Blob>>(new Map());
+  const fullPhotoLoadRequestsRef = useRef<Map<string, Promise<Blob | null>>>(
+    new Map()
+  );
   const overlayUrlRef = useRef<string | null>(null);
   const overlayPhotoIdRef = useRef<string | null>(null);
   const googleButtonContainerRef = useRef<HTMLDivElement | null>(null);
@@ -585,9 +608,9 @@ function App() {
     const ids = LAYERS.map((l) => l.id) as string[];
     if ("visibleLayers" in persisted && Array.isArray(persisted.visibleLayers)) {
       const valid = persisted.visibleLayers.filter((id) => ids.includes(id));
-      return new Set(valid);
+      return normalizeVisibleLayersForScale(new Set(valid), scales[scaleIndex] as Scale);
     }
-    return new Set(ids);
+    return normalizeVisibleLayersForScale(new Set(ids), scales[scaleIndex] as Scale);
   });
   const [overlayPhotoId, setOverlayPhotoId] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
@@ -640,6 +663,13 @@ function App() {
     pointerId: number;
     startX: number;
     startCenterMs: number;
+  } | null>(null);
+  const timelinePointersRef = useRef<Map<number, { x: number; y: number }>>(
+    new Map()
+  );
+  const pinchZoomRef = useRef<{
+    lastDistance: number;
+    accumulatedDelta: number;
   } | null>(null);
   const cardDragRef = useRef<{
     id: string;
@@ -721,7 +751,10 @@ function App() {
   const isAuthenticatedOwnerViewingCurrentProfile =
     authenticatedUser !== null &&
     activeProfile !== null &&
-    activeProfile.ownerUserId === authenticatedUser.id;
+    (activeProfile.ownerUserId === authenticatedUser.id ||
+      authenticatedUser.primaryProfileId === activeProfile.id ||
+      authenticatedUser.primaryProfileId ===
+        getProfileDatasetProfileId(activeProfile));
   const canAccessAdminFunctions =
     personalPhotoStorageIsServerMode && isAuthenticatedAdmin;
   const canManageCurrentProfile = personalPhotoStorageIsServerMode
@@ -1066,6 +1099,17 @@ function App() {
   }, [isMobileTimeline]);
 
   useEffect(() => {
+    if (!isSingleLayerScale(scale)) return;
+    setVisibleLayers((prev) => {
+      const next = normalizeVisibleLayersForScale(prev, scale);
+      if (next.size === prev.size && [...next].every((id) => prev.has(id))) {
+        return prev;
+      }
+      return next;
+    });
+  }, [scale]);
+
+  useEffect(() => {
     setCenterDate((prev) => clampCenterToToday(prev, scale));
   }, [scale]);
 
@@ -1110,17 +1154,37 @@ function App() {
     };
   }, []);
 
-  const loadSecondaryPhotoBlob = useCallback(async (id: string) => {
-    if (imageBlobsRef.current.has(id)) return;
-    const record = await getPhoto(id);
-    if (!record) return;
-    const url = URL.createObjectURL(record.imageBlob);
-    objectUrlsRef.current.set(id, url);
-    imageBlobsRef.current.set(id, record.imageBlob);
-    setPersonalPhotos((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, image: url } : p))
-    );
-  }, []);
+  const loadFullPhotoBlob = useCallback(
+    async (id: string): Promise<Blob | null> => {
+      const cachedBlob = imageBlobsRef.current.get(id);
+      if (cachedBlob) return cachedBlob;
+
+      const pendingRequest = fullPhotoLoadRequestsRef.current.get(id);
+      if (pendingRequest) return pendingRequest;
+
+      const request = getPhoto(id)
+        .then((record) => {
+          if (!record) return null;
+          const previousUrl = objectUrlsRef.current.get(id);
+          const url = URL.createObjectURL(record.imageBlob);
+          objectUrlsRef.current.set(id, url);
+          imageBlobsRef.current.set(id, record.imageBlob);
+          setPersonalPhotos((prev) =>
+            prev.map((p) => (p.id === id ? { ...p, image: url } : p))
+          );
+          if (previousUrl) URL.revokeObjectURL(previousUrl);
+          return record.imageBlob;
+        })
+        .catch(() => null)
+        .finally(() => {
+          fullPhotoLoadRequestsRef.current.delete(id);
+        });
+
+      fullPhotoLoadRequestsRef.current.set(id, request);
+      return request;
+    },
+    [getPhoto]
+  );
 
   useEffect(() => {
     overlayPhotoIdRef.current = overlayPhotoId;
@@ -1139,17 +1203,11 @@ function App() {
         setOverlayUrl(url);
       } else {
         const id = overlayPhotoId;
-        getPhoto(id).then((record) => {
-          if (!record || overlayPhotoIdRef.current !== id) return;
-          const blob = imageBlobsRef.current.get(id);
-          if (blob) return;
-          const url = URL.createObjectURL(record.imageBlob);
-          imageBlobsRef.current.set(id, record.imageBlob);
+        loadFullPhotoBlob(id).then((blob) => {
+          if (!blob || overlayPhotoIdRef.current !== id) return;
+          const url = URL.createObjectURL(blob);
           overlayUrlRef.current = url;
           setOverlayUrl(url);
-          setPersonalPhotos((prev) =>
-            prev.map((p) => (p.id === id ? { ...p, image: url } : p))
-          );
         });
         setOverlayUrl(null);
       }
@@ -1162,10 +1220,11 @@ function App() {
         overlayUrlRef.current = null;
       }
     };
-  }, [overlayPhotoId]);
+  }, [overlayPhotoId, loadFullPhotoBlob]);
 
   useEffect(() => {
     if (!overlayPhotoId) return;
+    if (!imageBlobsRef.current.has(overlayPhotoId)) return;
     const current = personalPhotos.find((p) => p.id === overlayPhotoId);
     if (!current) return;
     const dayIds = personalPhotos
@@ -1179,8 +1238,24 @@ function App() {
     const toLoad = [...new Set([...dayIds, ...seriesIds])].filter(
       (id) => !imageBlobsRef.current.has(id)
     );
-    toLoad.forEach((id) => loadSecondaryPhotoBlob(id));
-  }, [overlayPhotoId, personalPhotos, loadSecondaryPhotoBlob]);
+    let cancelled = false;
+    let nextIndex = 0;
+    const workerCount = Math.min(2, toLoad.length);
+    const runWorker = async () => {
+      while (!cancelled) {
+        const id = toLoad[nextIndex];
+        nextIndex += 1;
+        if (!id) return;
+        await loadFullPhotoBlob(id);
+      }
+    };
+    for (let i = 0; i < workerCount; i += 1) {
+      void runWorker();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [overlayPhotoId, personalPhotos, loadFullPhotoBlob]);
 
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
@@ -1544,12 +1619,16 @@ function App() {
 
   const toggleLayer = useCallback((layerId: string) => {
     setVisibleLayers((prev) => {
+      if (isSingleLayerScale(scale)) {
+        if (prev.has(layerId)) return new Set();
+        return new Set([layerId]);
+      }
       const next = new Set(prev);
       if (next.has(layerId)) next.delete(layerId);
       else next.add(layerId);
       return next;
     });
-  }, []);
+  }, [scale]);
 
   const histIdsSet = useMemo(
     () => new Set(visiblePositionedHistorical.map((e) => e.id)),
@@ -1926,6 +2005,7 @@ function App() {
         note: photo.note,
         showOnTimeline: photo.showOnTimeline,
         seriesId: photo.seriesId,
+        seriesReminder: photo.seriesReminder,
       })
     );
     const newRecord: PhotoRecord = {
@@ -1972,6 +2052,7 @@ function App() {
         laneIndex: newRecord.laneIndex,
         note: newRecord.note,
         showOnTimeline: true,
+        seriesReminder: newRecord.seriesReminder,
       },
     ]);
   };
@@ -2175,21 +2256,34 @@ function App() {
   const handleOverlaySave = useCallback(
     (
       id: string,
-      data: { date: string; title: string; note: string }
+      data: { date: string; title: string; note: string; seriesReminder: boolean }
     ) => {
       if (!canEditMetadataForCurrentView) return;
-      updatePhotoMetadata(id, data).then(() => {
-        setPersonalPhotos((prev) =>
-          prev.map((p) =>
-            p.id === id
-              ? { ...p, date: data.date, title: data.title, note: data.note }
-              : p
-          )
-        );
-        setOverlayEditMode(false);
-      });
+      updatePhotoMetadata(id, data)
+        .then(() => {
+          setPersonalPhotos((prev) =>
+            prev.map((p) =>
+              p.id === id
+                ? {
+                    ...p,
+                    date: data.date,
+                    title: data.title,
+                    note: data.note,
+                    seriesReminder: data.seriesReminder,
+                  }
+                : p
+            )
+          );
+          setOverlayEditMode(false);
+        })
+        .catch((err) => {
+          console.error("[photos] metadata save failed", err);
+          alert(
+            "Не удалось сохранить изменения. Обновите страницу и попробуйте ещё раз."
+          );
+        });
     },
-    [canEditMetadataForCurrentView]
+    [canEditMetadataForCurrentView, updatePhotoMetadata]
   );
 
   const handleReplaceImage = useCallback(
@@ -2259,6 +2353,7 @@ function App() {
           note: photo.note,
           showOnTimeline: photo.showOnTimeline,
           seriesId: photo.seriesId,
+          seriesReminder: photo.seriesReminder,
         })
       );
       const newRecord: PhotoRecord = {
@@ -2305,6 +2400,7 @@ function App() {
           laneIndex: newRecord.laneIndex,
           note: newRecord.note,
           showOnTimeline: false,
+          seriesReminder: newRecord.seriesReminder,
         },
       ]);
       setOverlayPhotoId(id);
@@ -2408,6 +2504,17 @@ function App() {
     }
   }, [canDeleteAllPhotosInDayForCurrentView, overlayPhotoId, personalPhotos]);
 
+  const changeScale = useCallback((direction: 1 | -1) => {
+    const maxScaleIndex = isMobileTimeline
+      ? MOBILE_MAX_SCALE_INDEX
+      : scales.length - 1;
+    setScaleIndex((current) => {
+      const next = current + direction;
+      if (next < 0 || next > maxScaleIndex) return current;
+      return next;
+    });
+  }, [isMobileTimeline]);
+
   const onWheel: React.WheelEventHandler<HTMLDivElement> = (e) => {
     if (overlayPhotoId || modalOpen || linkingMode) {
       const target = e.target as HTMLElement;
@@ -2418,15 +2525,7 @@ function App() {
       return;
     }
     e.preventDefault();
-    const direction = e.deltaY > 0 ? 1 : -1;
-    const maxScaleIndex = isMobileTimeline
-      ? MOBILE_MAX_SCALE_INDEX
-      : scales.length - 1;
-    setScaleIndex((current) => {
-      const next = current + direction;
-      if (next < 0 || next > maxScaleIndex) return current;
-      return next;
-    });
+    changeScale(e.deltaY > 0 ? 1 : -1);
   };
 
   useEffect(() => {
@@ -2472,6 +2571,73 @@ function App() {
     if (!overlayPhotoId) return;
     startAutoCenter();
   }, [overlayPhotoId, startAutoCenter]);
+
+  useEffect(() => {
+    const getPinchDistance = (): number | null => {
+      const points = [...timelinePointersRef.current.values()];
+      if (points.length < 2) return null;
+      const [a, b] = points;
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+
+    const resetTouchGesture = (): void => {
+      pinchZoomRef.current = null;
+      if (dragRef.current) {
+        dragRef.current = null;
+        setIsDragging(false);
+        scheduleIdleCenter();
+      }
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!timelinePointersRef.current.has(e.pointerId)) return;
+      timelinePointersRef.current.set(e.pointerId, {
+        x: e.clientX,
+        y: e.clientY,
+      });
+
+      if (timelinePointersRef.current.size < 2) return;
+      e.preventDefault();
+      const distance = getPinchDistance();
+      if (distance === null) return;
+      if (!pinchZoomRef.current) {
+        pinchZoomRef.current = { lastDistance: distance, accumulatedDelta: 0 };
+        return;
+      }
+
+      const pinch = pinchZoomRef.current;
+      const delta = distance - pinch.lastDistance;
+      pinch.lastDistance = distance;
+      pinch.accumulatedDelta += delta;
+
+      const thresholdPx = 28;
+      if (Math.abs(pinch.accumulatedDelta) < thresholdPx) return;
+
+      changeScale(pinch.accumulatedDelta > 0 ? -1 : 1);
+      pinch.accumulatedDelta = 0;
+    };
+
+    const onPointerEnd = (e: PointerEvent) => {
+      if (!timelinePointersRef.current.has(e.pointerId)) return;
+      timelinePointersRef.current.delete(e.pointerId);
+      if (timelinePointersRef.current.size < 2) {
+        resetTouchGesture();
+      } else {
+        const distance = getPinchDistance();
+        pinchZoomRef.current =
+          distance === null ? null : { lastDistance: distance, accumulatedDelta: 0 };
+      }
+    };
+
+    document.addEventListener("pointermove", onPointerMove, { passive: false });
+    document.addEventListener("pointerup", onPointerEnd);
+    document.addEventListener("pointercancel", onPointerEnd);
+    return () => {
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerEnd);
+      document.removeEventListener("pointercancel", onPointerEnd);
+    };
+  }, [changeScale, scheduleIdleCenter]);
 
   useEffect(() => {
     return () => {
@@ -2544,6 +2710,27 @@ function App() {
 
   const onTimelinePointerDown: React.PointerEventHandler<HTMLDivElement> = (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (e.pointerType === "touch") {
+      timelinePointersRef.current.set(e.pointerId, {
+        x: e.clientX,
+        y: e.clientY,
+      });
+      if (timelinePointersRef.current.size >= 2) {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelAutoCenter();
+        setIsDragging(false);
+        dragRef.current = null;
+        const points = [...timelinePointersRef.current.values()];
+        const a = points[0]!;
+        const b = points[1]!;
+        pinchZoomRef.current = {
+          lastDistance: Math.hypot(a.x - b.x, a.y - b.y),
+          accumulatedDelta: 0,
+        };
+        return;
+      }
+    }
     if (!e.isPrimary) return;
     const target = e.target as Element;
     const photoCard = target.closest(".event-personal.event-photo");
@@ -2949,6 +3136,7 @@ function App() {
                     date: p.date,
                     note: p.note,
                     seriesId: p.seriesId,
+                    seriesReminder: p.seriesReminder,
                   }
                 : null;
             })()
@@ -2958,6 +3146,7 @@ function App() {
             title: p.title,
             date: p.date,
             note: p.note,
+            seriesReminder: p.seriesReminder,
           }))}
           imageUrl={overlayUrl}
           isOpen={true}

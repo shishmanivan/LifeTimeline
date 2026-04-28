@@ -31,6 +31,8 @@ export type PhotoRecord = {
   showOnTimeline?: boolean;
   /** Series this photo belongs to */
   seriesId?: string;
+  /** Shows a hint that this text continues the previous photo in the series */
+  seriesReminder?: boolean;
 };
 
 const DEFAULT_PROFILE_ID = "1";
@@ -232,6 +234,7 @@ export type PhotoMetadataUpdate = {
   date?: string;
   title?: string;
   note?: string;
+  seriesReminder?: boolean;
 };
 
 export async function updatePhotoMetadata(

@@ -1,6 +1,2 @@
-date	url	image	title	lang
-2015-03-24	https://en.wikipedia.org/wiki/Germanwings_Flight_9525		Катастрофа самолёта Germanwings A320	ru	https://ru.wikipedia.org/wiki/Катастрофа_Germanwings_Airbus_A320_24_марта_2015_года
-
-
-
-
+date	en_url	image	en_title	ru_title	ru_url
+2015-03-24	https://en.wikipedia.org/wiki/Germanwings_Flight_9525		Germanwings Flight 9525	Катастрофа самолёта Germanwings A320	https://ru.wikipedia.org/wiki/Катастрофа_Germanwings_Airbus_A320_24_марта_2015_года

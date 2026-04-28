@@ -228,5 +228,13 @@ function copyHistoryPicsToDistPlugin() {
 }
 export default defineConfig({
     plugins: [react(), serveHistoryPicsDevPlugin(), copyHistoryPicsToDistPlugin()],
+    server: {
+        proxy: {
+            "/api": {
+                target: "http://127.0.0.1:8787",
+                changeOrigin: true,
+            },
+        },
+    },
     assetsInclude: ["**/*.jfif", "**/*.tsv", "**/*.JPG"],
 });

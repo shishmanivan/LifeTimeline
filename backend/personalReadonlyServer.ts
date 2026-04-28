@@ -242,7 +242,14 @@ function parsePhotoMetadataPatch(body: unknown): PreparedPhotoMetadataPatch {
   }
 
   const patch: PreparedPhotoMetadataPatch = {};
-  const allowedKeys = new Set(["title", "date", "note", "offsetY", "offsetXDays"]);
+  const allowedKeys = new Set([
+    "title",
+    "date",
+    "note",
+    "offsetY",
+    "offsetXDays",
+    "seriesReminder",
+  ]);
 
   for (const key of Object.keys(body)) {
     if (!allowedKeys.has(key)) {
@@ -290,6 +297,13 @@ function parsePhotoMetadataPatch(body: unknown): PreparedPhotoMetadataPatch {
       throw new Error("Field \"offsetXDays\" must be a finite number.");
     }
     patch.offsetXDays = body.offsetXDays;
+  }
+
+  if ("seriesReminder" in body) {
+    if (typeof body.seriesReminder !== "boolean") {
+      throw new Error('Field "seriesReminder" must be a boolean.');
+    }
+    patch.seriesReminder = body.seriesReminder;
   }
 
   if (Object.keys(patch).length === 0) {
@@ -517,6 +531,7 @@ function parsePhotoUpsertMetadata(
     "laneIndex",
     "showOnTimeline",
     "seriesId",
+    "seriesReminder",
   ]);
   for (const key of Object.keys(body)) {
     if (!allowedKeys.has(key)) {
@@ -607,6 +622,13 @@ function parsePhotoUpsertMetadata(
       throw new Error('Field "seriesId" must be a non-empty string.');
     }
     metadata.seriesId = body.seriesId;
+  }
+
+  if ("seriesReminder" in body) {
+    if (typeof body.seriesReminder !== "boolean") {
+      throw new Error('Field "seriesReminder" must be a boolean.');
+    }
+    metadata.seriesReminder = body.seriesReminder;
   }
 
   return metadata;

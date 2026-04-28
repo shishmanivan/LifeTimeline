@@ -1,10 +1,4 @@
-date	url	image	title	lang
-2008-02-17	https://en.wikipedia.org/wiki/2008_Kosovo_declaration_of_independence	https://upload.wikimedia.org/wikipedia/commons/d/d7/Emblem_of_the_Republic_of_Kosovo.svg	Провозглашена независимость Косово	ru	https://ru.wikipedia.org/wiki/Провозглашение_независимости_Косова
-2008-03-02	https://en.wikipedia.org/wiki/João_Bernardo_Vieira		Убит президент Гвинеи-Бисау Жуан Бернарду Виейра	ru	https://ru.wikipedia.org/wiki/Виейра,_Жуан_Бернарду
-2008-06-01	https://en.wikipedia.org/wiki/Yves_Saint_Laurent_(designer)		Умер Ив Сен-Лоран	ru	https://ru.wikipedia.org/wiki/Сен-Лоран,_Ив
-
-
-
-
-
-
+date	en_url	image	en_title	ru_title	ru_url
+2008-02-17	https://en.wikipedia.org/wiki/2008_Kosovo_declaration_of_independence	https://upload.wikimedia.org/wikipedia/commons/d/d7/Emblem_of_the_Republic_of_Kosovo.svg	2008 Kosovo declaration of independence	Провозглашена независимость Косово	https://ru.wikipedia.org/wiki/Провозглашение_независимости_Косова
+2008-03-02	https://en.wikipedia.org/wiki/João_Bernardo_Vieira		João Bernardo Vieira	Убит президент Гвинеи-Бисау Жуан Бернарду Виейра	https://ru.wikipedia.org/wiki/Виейра,_Жуан_Бернарду
+2008-06-01	https://en.wikipedia.org/wiki/Yves_Saint_Laurent_(designer)		Yves Saint Laurent (designer)	Умер Ив Сен-Лоран	https://ru.wikipedia.org/wiki/Сен-Лоран,_Ив

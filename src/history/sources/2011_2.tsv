@@ -1,12 +1,8 @@
-date	url	image	title	lang
-2011-03-19	https://en.wikipedia.org/wiki/2011_military_intervention_in_Libya		Начало военной операции НАТО в Ливии	ru	https://ru.wikipedia.org/wiki/Военная_операция_НАТО_в_Ливии
-2011-06-24	https://en.wikipedia.org/wiki/Space_Shuttle_Atlantis		Последний полёт шаттла «Атлантис» (завершение программы Space Shuttle)	ru	https://ru.wikipedia.org/wiki/Атлантис_(шаттл)
-2011-07-22	https://en.wikipedia.org/wiki/2011_Norway_attacks		Теракты Андреса Брейвика	ru	https://ru.wikipedia.org/wiki/Теракты_в_Норвегии_(2011)
-2011-08-05	https://en.wikipedia.org/wiki/Standard_%26_Poor%27s	https://upload.wikimedia.org/wikipedia/commons/1/1a/BlankMap-World_S%26P.svg	Снижение кредитного рейтинга США агентством S&P	ru	https://ru.wikipedia.org/wiki/Standard_%26_Poor%27s
-2011-10-05	https://en.wikipedia.org/wiki/Steve_Jobs		Умер Стив Джобс	ru	https://ru.wikipedia.org/wiki/Джобс,_Стив
-2011-12-18	https://en.wikipedia.org/wiki/Iraq_War		Официальное завершение военной операции США в Ираке	ru	https://ru.wikipedia.org/wiki/Иракская_война
-2011-04-29	https://en.wikipedia.org/wiki/Wedding_of_Prince_William_and_Catherine_Middleton		Свадьба принца Уильяма и Кэтрин Миддлтон	ru	https://ru.wikipedia.org/wiki/Свадьба_принца_Уильяма_и_Кэтрин_Миддлтон
-
-
-
-
+date	en_url	image	en_title	ru_title	ru_url
+2011-03-19	https://en.wikipedia.org/wiki/2011_military_intervention_in_Libya		2011 military intervention in Libya	Начало военной операции НАТО в Ливии	https://ru.wikipedia.org/wiki/Военная_операция_НАТО_в_Ливии
+2011-06-24	https://en.wikipedia.org/wiki/Space_Shuttle_Atlantis		Space Shuttle Atlantis	Последний полёт шаттла «Атлантис» (завершение программы Space Shuttle)	https://ru.wikipedia.org/wiki/Атлантис_(шаттл)
+2011-07-22	https://en.wikipedia.org/wiki/2011_Norway_attacks		2011 Norway attacks	Теракты Андреса Брейвика	https://ru.wikipedia.org/wiki/Теракты_в_Норвегии_(2011)
+2011-08-05	https://en.wikipedia.org/wiki/Standard_%26_Poor%27s	https://upload.wikimedia.org/wikipedia/commons/1/1a/BlankMap-World_S%26P.svg	S&P Global Ratings	Снижение кредитного рейтинга США агентством S&P	https://ru.wikipedia.org/wiki/Standard_%26_Poor%27s
+2011-10-05	https://en.wikipedia.org/wiki/Steve_Jobs		Steve Jobs	Умер Стив Джобс	https://ru.wikipedia.org/wiki/Джобс,_Стив
+2011-12-18	https://en.wikipedia.org/wiki/Iraq_War		Iraq War	Официальное завершение военной операции США в Ираке	https://ru.wikipedia.org/wiki/Иракская_война
+2011-04-29	https://en.wikipedia.org/wiki/Wedding_of_Prince_William_and_Catherine_Middleton		Wedding of Prince William and Catherine Middleton	Свадьба принца Уильяма и Кэтрин Миддлтон	https://ru.wikipedia.org/wiki/Свадьба_принца_Уильяма_и_Кэтрин_Миддлтон

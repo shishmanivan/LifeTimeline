@@ -6,6 +6,7 @@ export type PersonalPhotoForModal = {
   date: string;
   note?: string;
   seriesId?: string;
+  seriesReminder?: boolean;
 };
 
 export type PhotoInSeriesForModal = {
@@ -29,7 +30,7 @@ type PersonalPhotoModalProps = {
   onEdit: () => void;
   onSave: (
     id: string,
-    data: { date: string; title: string; note: string }
+    data: { date: string; title: string; note: string; seriesReminder: boolean }
   ) => void;
   onRenameSeries: (seriesId: string, title: string) => void | Promise<void>;
   onReplaceImage: (id: string, file: File) => void;
@@ -103,6 +104,7 @@ export function PersonalPhotoModal({
   const [draftDate, setDraftDate] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftNote, setDraftNote] = useState("");
+  const [draftSeriesReminder, setDraftSeriesReminder] = useState(false);
   const [renamingSeries, setRenamingSeries] = useState(false);
   const [draftSeriesTitle, setDraftSeriesTitle] = useState("");
   const [seriesGalleryOpen, setSeriesGalleryOpen] = useState(false);
@@ -133,6 +135,7 @@ export function PersonalPhotoModal({
       setDraftDate(photo.date);
       setDraftTitle(photo.title);
       setDraftNote(photo.note ?? "");
+      setDraftSeriesReminder(photo.seriesReminder === true);
       setRenamingSeries(false);
       setSeriesGalleryOpen(false);
     }
@@ -213,9 +216,10 @@ export function PersonalPhotoModal({
         date: draftDate,
         title: draftTitle.trim() || "Фото",
         note: draftNote,
+        seriesReminder: draftSeriesReminder,
       });
     }
-  }, [photo, draftDate, draftTitle, draftNote, onSave]);
+  }, [photo, draftDate, draftTitle, draftNote, draftSeriesReminder, onSave]);
 
   const handleReplaceImage = useCallback(() => {
     fileInputRef.current?.click();
@@ -256,7 +260,15 @@ export function PersonalPhotoModal({
     !!photo &&
     (draftDate !== photo.date ||
       draftTitle !== photo.title ||
-      draftNote !== (photo.note ?? ""));
+      draftNote !== (photo.note ?? "") ||
+      draftSeriesReminder !== (photo.seriesReminder === true));
+  const currentSeriesIndex = photo
+    ? photosInSeries.findIndex((p) => p.id === photo.id)
+    : -1;
+  const seriesReminderTarget =
+    photo?.seriesReminder === true && currentSeriesIndex > 0
+      ? photosInSeries[currentSeriesIndex - 1]
+      : null;
   const prevPhoto = canCycle
     ? photosInDay[currentIndex <= 0 ? photosInDay.length - 1 : currentIndex - 1]
     : null;
@@ -666,6 +678,16 @@ export function PersonalPhotoModal({
                     rows={hasStartedEditing ? 16 : 6}
                   />
                 </div>
+                {photo.seriesId && (
+                  <label className="personal-modal-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={draftSeriesReminder}
+                      onChange={(e) => setDraftSeriesReminder(e.target.checked)}
+                    />
+                    <span>Поставить напоминание о серии</span>
+                  </label>
+                )}
                 <div className="personal-modal-edit-actions">
                   {disableNonMetadataActions && allowMetadataEdit && (
                     <p className="personal-readonly-note personal-readonly-note-compact">
@@ -793,6 +815,15 @@ export function PersonalPhotoModal({
               </>
             ) : (
               <>
+                {seriesReminderTarget && (
+                  <button
+                    type="button"
+                    className="personal-modal-series-reminder"
+                    onClick={() => onNavigate(seriesReminderTarget.id)}
+                  >
+                    Начало здесь
+                  </button>
+                )}
                 <h2 id="personal-modal-title" className="personal-modal-title">
                   {photo.title}
                 </h2>

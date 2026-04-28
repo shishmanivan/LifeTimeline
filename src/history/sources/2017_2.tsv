@@ -1,8 +1,6 @@
-date	url	image	title	lang	ru_url
-2017-01-27	https://en.wikipedia.org/wiki/Executive_Order_13769		Первый «иммиграционный указ» Трампа (travel ban)	ru
-2017-05-12	https://en.wikipedia.org/wiki/WannaCry_ransomware_attack	https://upload.wikimedia.org/wikipedia/en/1/18/Wana_Decrypt0r_screenshot.png	Кибератака вируса-вымогателя WannaCry	ru
-2017-06-05	https://en.wikipedia.org/wiki/Qatar_diplomatic_crisis		Дипломатический кризис вокруг Катара	ru
-2017-10-01	https://en.wikipedia.org/wiki/2017_Las_Vegas_shooting		Стрельба в Лас-Вегасе	ru
-2017-12-06	https://en.wikipedia.org/wiki/United_States_recognition_of_Jerusalem_as_capital_of_Israel	https://upload.wikimedia.org/wikipedia/commons/5/5a/Jerusalem_Ost-Jerusalem_2.JPG	Признание США Иерусалима столицей Израиля	ru
-
-
+date	en_url	image	en_title	ru_title	ru_url
+2017-01-27	https://en.wikipedia.org/wiki/Executive_Order_13769		Executive Order 13769	Первый «иммиграционный указ» Трампа (travel ban)	https://en.wikipedia.org/wiki/Executive_Order_13769
+2017-05-12	https://en.wikipedia.org/wiki/WannaCry_ransomware_attack	https://upload.wikimedia.org/wikipedia/en/1/18/Wana_Decrypt0r_screenshot.png	WannaCry ransomware attack	Кибератака вируса-вымогателя WannaCry	https://en.wikipedia.org/wiki/WannaCry_ransomware_attack
+2017-06-05	https://en.wikipedia.org/wiki/Qatar_diplomatic_crisis		Qatar diplomatic crisis	Дипломатический кризис вокруг Катара	https://en.wikipedia.org/wiki/Qatar_diplomatic_crisis
+2017-10-01	https://en.wikipedia.org/wiki/2017_Las_Vegas_shooting		2017 Las Vegas shooting	Стрельба в Лас-Вегасе	https://en.wikipedia.org/wiki/2017_Las_Vegas_shooting
+2017-12-06	https://en.wikipedia.org/wiki/United_States_recognition_of_Jerusalem_as_capital_of_Israel	https://upload.wikimedia.org/wikipedia/commons/5/5a/Jerusalem_Ost-Jerusalem_2.JPG	United States recognition of Jerusalem as capital of Israel	Признание США Иерусалима столицей Израиля	https://en.wikipedia.org/wiki/United_States_recognition_of_Jerusalem_as_capital_of_Israel
