@@ -100,6 +100,18 @@ export type DeleteServerPersonalPhotosInDayResponse = {
   deletedPhotoIds: string[];
 };
 
+export type RecordPhotoViewResponse = {
+  ok: boolean;
+  photoId: string;
+  countedUnique: boolean;
+  stats: {
+    uniqueAccountViews: number;
+    uniqueGuestViews: number;
+    uniqueViews: number;
+    rawOpens: number;
+  };
+};
+
 /**
  * Expected multipart body for creating/upserting a full personal photo record.
  * `metadata` is sent as JSON, `image` is the original blob, `preview` is optional.
@@ -292,6 +304,34 @@ export async function authenticateWithGoogleViaServer(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function recordPhotoViewViaServer(
+  photoId: string,
+  viewerId: string,
+  options: Pick<
+    ServerPersonalPhotoStorageOptions,
+    "baseUrl" | "fetchImpl" | "writeToken"
+  > = {}
+): Promise<RecordPhotoViewResponse> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const writeToken = options.writeToken ?? getActiveBrowserWriteAccessToken();
+  return await fetchJson<RecordPhotoViewResponse>(
+    fetchImpl,
+    joinApiUrl(
+      options.baseUrl,
+      "",
+      `/api/photo-views/photos/${encodeURIComponent(photoId)}`
+    ),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getWriteAuthHeaders(writeToken),
+      },
+      body: JSON.stringify({ viewerId }),
     }
   );
 }

@@ -2044,6 +2044,10 @@ body {
     padding: 8px 12px;
   }
 
+  .top-bar-note-readonly {
+    display: none;
+  }
+
   .timeline-profile-notes {
     display: none;
   }

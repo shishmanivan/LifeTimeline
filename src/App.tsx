@@ -16,6 +16,7 @@ import type {
 import {
   authenticateWithGoogleViaServer,
   loadProfileForCurrentRoute,
+  recordPhotoViewViaServer,
   type ServerProfileDto,
 } from "./serverPersonalPhotoStorage";
 import { getProfileRouteState } from "./profileRouteState";
@@ -52,6 +53,7 @@ import { RecoverAccessCard } from "./RecoverAccessCard";
 import {
   clearActiveBrowserUser,
   clearRememberedBrowserUser,
+  getOrCreateBrowserViewerId,
   loadActiveBrowserUser,
   loadRememberedBrowserUser,
   saveActiveBrowserUser,
@@ -251,6 +253,8 @@ function normalizeVisibleLayersForScale(
 }
 
 const TIMELINE_STATE_KEY = "timeline-mvp-state";
+const FIRST_VISIT_CENTER_DATE = "2000-01-01";
+const FIRST_VISIT_VISIBLE_LAYERS: LayerId[] = ["main"];
 
 function getGoogleAuthErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -515,6 +519,7 @@ function App() {
     canWritePreview,
   } = personalPhotoCapabilities;
   const loadPhotosGenerationRef = useRef(0);
+  const lastTrackedOpenPhotoIdRef = useRef<string | null>(null);
   const publicServerReadOnlyUx =
     personalPhotoStorageIsServerMode && !canWrite;
   const [userSessionSettingsModalOpen, setUserSessionSettingsModalOpen] =
@@ -610,7 +615,10 @@ function App() {
       const valid = persisted.visibleLayers.filter((id) => ids.includes(id));
       return normalizeVisibleLayersForScale(new Set(valid), scales[scaleIndex] as Scale);
     }
-    return normalizeVisibleLayersForScale(new Set(ids), scales[scaleIndex] as Scale);
+    return normalizeVisibleLayersForScale(
+      new Set(FIRST_VISIT_VISIBLE_LAYERS),
+      scales[scaleIndex] as Scale
+    );
   });
   const [overlayPhotoId, setOverlayPhotoId] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
@@ -638,7 +646,7 @@ function App() {
       const d = new Date(s);
       if (!isNaN(d.getTime())) return clampCenterToToday(d, scaleForClamp);
     }
-    return clampCenterToToday(new Date(), scaleForClamp);
+    return clampCenterToToday(new Date(FIRST_VISIT_CENTER_DATE), scaleForClamp);
   });
   const [isDragging, setIsDragging] = useState(false);
   const [cardDragging, setCardDragging] = useState<string | null>(null);
@@ -1256,6 +1264,22 @@ function App() {
       cancelled = true;
     };
   }, [overlayPhotoId, personalPhotos, loadFullPhotoBlob]);
+
+  useEffect(() => {
+    if (!personalPhotoStorageIsServerMode) return;
+    if (!overlayPhotoId) {
+      lastTrackedOpenPhotoIdRef.current = null;
+      return;
+    }
+    if (lastTrackedOpenPhotoIdRef.current === overlayPhotoId) return;
+    if (!personalPhotos.some((photo) => photo.id === overlayPhotoId)) return;
+
+    lastTrackedOpenPhotoIdRef.current = overlayPhotoId;
+    const viewerId = getOrCreateBrowserViewerId();
+    recordPhotoViewViaServer(overlayPhotoId, viewerId).catch((error) => {
+      console.error("[views] photo view tracking failed", error);
+    });
+  }, [overlayPhotoId, personalPhotos]);
 
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
@@ -3054,7 +3078,9 @@ function App() {
             </div>
           )}
           {publicServerReadOnlyUx ? (
-            <div className="top-bar-note">Личный слой: только просмотр.</div>
+            <div className="top-bar-note top-bar-note-readonly">
+              Личный слой: только просмотр.
+            </div>
           ) : null}
           <div className="scale">Масштаб: {scaleMeta[scale].label}</div>
         </div>

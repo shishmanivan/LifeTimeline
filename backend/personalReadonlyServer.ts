@@ -49,6 +49,7 @@ import {
   authenticateWithGoogle,
   GoogleAuthError,
 } from "./googleAuthService";
+import { recordPhotoView, type PhotoViewIdentity } from "./photoViewStore";
 import type { ProfileModel } from "../src/profileModel";
 import { getProfileDatasetProfileId } from "../src/profileModel";
 import type {
@@ -489,6 +490,38 @@ function parseGoogleAuthInput(body: unknown): GoogleAuthInput {
   };
 }
 
+function parsePhotoViewIdentity(
+  body: unknown,
+  authUser: UserModel | null
+): PhotoViewIdentity {
+  if (!isRecord(body)) {
+    throw new Error("Photo view body must be a JSON object.");
+  }
+
+  const viewerId =
+    typeof body.viewerId === "string" ? body.viewerId.trim() : undefined;
+  if (viewerId && !/^[a-zA-Z0-9._:-]{16,128}$/.test(viewerId)) {
+    throw new Error('Field "viewerId" has an invalid format.');
+  }
+
+  if (authUser) {
+    return {
+      type: "account",
+      userId: authUser.id,
+      viewerId,
+    };
+  }
+
+  if (!viewerId) {
+    throw new Error('Field "viewerId" must be a string.');
+  }
+
+  return {
+    type: "anonymous",
+    viewerId,
+  };
+}
+
 async function readMultipartFormData(req: IncomingMessage): Promise<FormData> {
   const contentTypeHeader = req.headers["content-type"];
   const contentType = Array.isArray(contentTypeHeader)
@@ -902,6 +935,42 @@ async function handleRequest(
       profiles: await listProfilesForAdmin(),
     });
     return;
+  }
+
+  const photoViewMatch = pathname.match(/^\/api\/photo-views\/photos\/([^/]+)$/);
+  if (req.method === "POST" && photoViewMatch) {
+    const photoId = decodeURIComponent(photoViewMatch[1]).trim();
+    if (!photoId) {
+      sendJson(res, 400, {
+        error: "invalid-input",
+        message: "Photo id is required.",
+      });
+      return;
+    }
+
+    try {
+      const identity = parsePhotoViewIdentity(await readJsonBody(req), authUser);
+      const result = await recordPhotoView(photoId, identity);
+      sendJson(res, 200, {
+        ok: true,
+        photoId,
+        countedUnique: result.countedUnique,
+        stats: {
+          uniqueAccountViews: result.uniqueAccountViews,
+          uniqueGuestViews: result.uniqueGuestViews,
+          uniqueViews: result.uniqueViews,
+          rawOpens: result.rawOpens,
+        },
+      });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      sendJson(res, 400, {
+        error: "invalid-input",
+        message,
+      });
+      return;
+    }
   }
 
   const photosByDateMatch = pathname.match(/^\/api\/personal\/photos\/by-date\/([^/]+)$/);
