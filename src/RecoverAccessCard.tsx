@@ -30,7 +30,7 @@ export function RecoverAccessCard({
     event.preventDefault();
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      setErrorMessage("Укажите email, который использовался при регистрации.");
+      setErrorMessage("Укажите email для входа или создания профиля.");
       return;
     }
 
@@ -44,11 +44,11 @@ export function RecoverAccessCard({
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("404")) {
-        setErrorMessage("Профиль для этого email не найден.");
+        setErrorMessage("Не удалось найти или подготовить профиль для этого email.");
       } else if (message.includes("400")) {
         setErrorMessage("Проверьте email и попробуйте ещё раз.");
       } else {
-        setErrorMessage("Не удалось запросить recovery code. Попробуйте ещё раз.");
+        setErrorMessage("Не удалось запросить одноразовый код. Попробуйте ещё раз.");
       }
     } finally {
       setSubmitting(false);
@@ -60,7 +60,7 @@ export function RecoverAccessCard({
     const trimmedEmail = email.trim();
     const trimmedCode = code.trim();
     if (!trimmedEmail || !trimmedCode) {
-      setErrorMessage("Укажите email и recovery code.");
+      setErrorMessage("Укажите email и одноразовый код.");
       return;
     }
 
@@ -76,15 +76,15 @@ export function RecoverAccessCard({
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("404")) {
-        setErrorMessage("Профиль для этого email не найден.");
+        setErrorMessage("Не удалось найти или создать профиль для этого email.");
       } else if (message.includes("expired-code")) {
-        setErrorMessage("Recovery code истёк. Запросите новый код.");
+        setErrorMessage("Одноразовый код истёк. Запросите новый код.");
       } else if (message.includes("invalid-code")) {
-        setErrorMessage("Recovery code неверный.");
+        setErrorMessage("Одноразовый код неверный.");
       } else if (message.includes("400")) {
-        setErrorMessage("Проверьте email и recovery code.");
+        setErrorMessage("Проверьте email и одноразовый код.");
       } else {
-        setErrorMessage("Не удалось подтвердить recovery code. Попробуйте ещё раз.");
+        setErrorMessage("Не удалось подтвердить одноразовый код. Попробуйте ещё раз.");
       }
     } finally {
       setSubmitting(false);
@@ -100,7 +100,7 @@ export function RecoverAccessCard({
   return (
     <section className="registration-card registration-card-secondary">
       <div className="registration-card-eyebrow">Вход</div>
-      <h2 className="registration-card-title">Войти</h2>
+      <h2 className="registration-card-title">Войти или создать профиль</h2>
 
       {loginStep === "enter_email" ? (
         <>
@@ -108,8 +108,8 @@ export function RecoverAccessCard({
             Укажите email — мы отправим одноразовый код для входа в этот браузер.
           </p>
           <p className="registration-card-copy">
-            Не можете войти? Этим же способом можно восстановить доступ к уже
-            созданному профилю.
+            Если профиля для этого email ещё нет, мы создадим его после
+            подтверждения кода.
           </p>
           <form className="registration-form" onSubmit={handleRequestCode}>
             <label className="registration-field">
