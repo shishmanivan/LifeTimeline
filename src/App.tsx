@@ -15,6 +15,7 @@ import type {
 } from "./personalPhotoStorage";
 import {
   authenticateWithGoogleViaServer,
+  getPhotoViewStatsViaServer,
   loadProfileForCurrentRoute,
   recordPhotoViewViaServer,
   type ServerProfileDto,
@@ -622,6 +623,9 @@ function App() {
   });
   const [overlayPhotoId, setOverlayPhotoId] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
+  const [adminOverlayPhotoViewCount, setAdminOverlayPhotoViewCount] = useState<
+    number | null
+  >(null);
   const [overlayEditMode, setOverlayEditMode] = useState(false);
   const [linkingMode, setLinkingMode] = useState(false);
   const [linkingSourcePhotoId, setLinkingSourcePhotoId] = useState<string | null>(
@@ -1276,10 +1280,42 @@ function App() {
 
     lastTrackedOpenPhotoIdRef.current = overlayPhotoId;
     const viewerId = getOrCreateBrowserViewerId();
-    recordPhotoViewViaServer(overlayPhotoId, viewerId).catch((error) => {
-      console.error("[views] photo view tracking failed", error);
-    });
-  }, [overlayPhotoId, personalPhotos]);
+    recordPhotoViewViaServer(overlayPhotoId, viewerId)
+      .then((response) => {
+        if (isAuthenticatedAdmin && overlayPhotoIdRef.current === overlayPhotoId) {
+          setAdminOverlayPhotoViewCount(response.stats.uniqueViews);
+        }
+      })
+      .catch((error) => {
+        console.error("[views] photo view tracking failed", error);
+      });
+  }, [overlayPhotoId, personalPhotos, isAuthenticatedAdmin]);
+
+  useEffect(() => {
+    if (!personalPhotoStorageIsServerMode || !isAuthenticatedAdmin || !overlayPhotoId) {
+      setAdminOverlayPhotoViewCount(null);
+      return;
+    }
+
+    let cancelled = false;
+    setAdminOverlayPhotoViewCount(null);
+    getPhotoViewStatsViaServer(overlayPhotoId)
+      .then((stats) => {
+        if (!cancelled) {
+          setAdminOverlayPhotoViewCount(stats.uniqueViews);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setAdminOverlayPhotoViewCount(null);
+        }
+        console.error("[views] admin stats load failed", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [overlayPhotoId, isAuthenticatedAdmin]);
 
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
@@ -3210,6 +3246,9 @@ function App() {
           allowDeleteAllPhotosInDay={canDeleteAllPhotosInDayForCurrentView}
           allowSeriesLinking={canLinkSeriesForCurrentView}
           allowSeriesUnlinking={canUnlinkSeriesForCurrentView}
+          adminPhotoViewCount={
+            isAuthenticatedAdmin ? adminOverlayPhotoViewCount : null
+          }
         />
       )}
 

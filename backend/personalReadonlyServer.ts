@@ -49,7 +49,11 @@ import {
   authenticateWithGoogle,
   GoogleAuthError,
 } from "./googleAuthService";
-import { recordPhotoView, type PhotoViewIdentity } from "./photoViewStore";
+import {
+  readPhotoViewStats,
+  recordPhotoView,
+  type PhotoViewIdentity,
+} from "./photoViewStore";
 import type { ProfileModel } from "../src/profileModel";
 import { getProfileDatasetProfileId } from "../src/profileModel";
 import type {
@@ -938,13 +942,31 @@ async function handleRequest(
   }
 
   const photoViewMatch = pathname.match(/^\/api\/photo-views\/photos\/([^/]+)$/);
-  if (req.method === "POST" && photoViewMatch) {
+  if (photoViewMatch) {
     const photoId = decodeURIComponent(photoViewMatch[1]).trim();
     if (!photoId) {
       sendJson(res, 400, {
         error: "invalid-input",
         message: "Photo id is required.",
       });
+      return;
+    }
+
+    if (req.method === "GET") {
+      if (!mayUserAdmin(authUser)) {
+        sendText(res, 403, "Admin access required.");
+        return;
+      }
+
+      sendJson(res, 200, {
+        photoId,
+        stats: await readPhotoViewStats(photoId),
+      });
+      return;
+    }
+
+    if (req.method !== "POST") {
+      sendText(res, 405, "Method not allowed.");
       return;
     }
 

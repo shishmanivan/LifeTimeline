@@ -52,6 +52,7 @@ type PersonalPhotoModalProps = {
   allowDeleteAllPhotosInDay?: boolean;
   allowSeriesLinking?: boolean;
   allowSeriesUnlinking?: boolean;
+  adminPhotoViewCount?: number | null;
   disabledActionsMessage?: string;
 };
 
@@ -98,6 +99,7 @@ export function PersonalPhotoModal({
   allowDeleteAllPhotosInDay = false,
   allowSeriesLinking = false,
   allowSeriesUnlinking = false,
+  adminPhotoViewCount = null,
   disabledActionsMessage = "Server mode: image/add/delete actions are still disabled for now",
 }: PersonalPhotoModalProps) {
   const [linkStep, setLinkStep] = useState<"confirm" | "chooseSeries">("confirm");
@@ -856,6 +858,11 @@ export function PersonalPhotoModal({
                     <p className="personal-readonly-note personal-readonly-note-compact">
                       {disabledActionsMessage}
                     </p>
+                  )}
+                  {allowMetadataEdit && adminPhotoViewCount !== null && (
+                    <span className="personal-modal-admin-views">
+                      Просмотров: {adminPhotoViewCount}
+                    </span>
                   )}
                   {allowMetadataEdit && (
                     <button

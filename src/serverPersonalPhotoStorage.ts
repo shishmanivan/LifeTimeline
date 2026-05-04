@@ -112,6 +112,13 @@ export type RecordPhotoViewResponse = {
   };
 };
 
+export type PhotoViewStats = RecordPhotoViewResponse["stats"];
+
+export type GetPhotoViewStatsResponse = {
+  photoId: string;
+  stats: PhotoViewStats;
+};
+
 /**
  * Expected multipart body for creating/upserting a full personal photo record.
  * `metadata` is sent as JSON, `image` is the original blob, `preview` is optional.
@@ -334,6 +341,29 @@ export async function recordPhotoViewViaServer(
       body: JSON.stringify({ viewerId }),
     }
   );
+}
+
+export async function getPhotoViewStatsViaServer(
+  photoId: string,
+  options: Pick<
+    ServerPersonalPhotoStorageOptions,
+    "baseUrl" | "fetchImpl" | "writeToken"
+  > = {}
+): Promise<PhotoViewStats> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const writeToken = options.writeToken ?? getActiveBrowserWriteAccessToken();
+  const response = await fetchJson<GetPhotoViewStatsResponse>(
+    fetchImpl,
+    joinApiUrl(
+      options.baseUrl,
+      "",
+      `/api/photo-views/photos/${encodeURIComponent(photoId)}`
+    ),
+    {
+      headers: getWriteAuthHeaders(writeToken),
+    }
+  );
+  return response.stats;
 }
 
 function getPhotosListUrl(

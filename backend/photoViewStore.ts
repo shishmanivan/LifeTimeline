@@ -242,3 +242,17 @@ export async function recordPhotoView(
     };
   });
 }
+
+export async function readPhotoViewStats(photoId: string): Promise<PhotoViewStats> {
+  const store = await readPhotoViewStore();
+  const photo = store.photos[photoId];
+  if (!photo) {
+    return {
+      uniqueAccountViews: 0,
+      uniqueGuestViews: 0,
+      uniqueViews: 0,
+      rawOpens: 0,
+    };
+  }
+  return getPhotoStats(photo);
+}
