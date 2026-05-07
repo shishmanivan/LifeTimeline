@@ -9,6 +9,10 @@ import type {
   SeriesRecord,
 } from "./personalPhotoStorage";
 import type { ProfileModel } from "./profileModel";
+import {
+  normalizePhotoSocialSettings,
+  type PhotoSocialSettings,
+} from "./photoSocial";
 import type {
   CurrentAuthenticatedUserResult,
   GoogleAuthInput,
@@ -60,6 +64,7 @@ type ServerPhotoFields = {
   showOnTimeline?: boolean;
   seriesId?: string;
   seriesReminder?: boolean;
+  social?: PhotoSocialSettings;
 };
 
 /**
@@ -69,6 +74,7 @@ type ServerPhotoFields = {
  */
 export type ServerPersonalPhotoDto = ServerPhotoFields & {
   profileId: string;
+  social: PhotoSocialSettings;
   imageUrl: string;
   previewUrl?: string;
 };
@@ -141,6 +147,7 @@ export type PatchServerPersonalPhotoMetadataRequest = {
   offsetY?: number;
   offsetXDays?: number;
   seriesReminder?: boolean;
+  social?: PhotoSocialSettings;
 };
 
 export type UpdateServerPhotoSeriesRequest = {
@@ -497,6 +504,7 @@ function toServerPhotoFields(photo: PhotoRecord): ServerPhotoFields {
     showOnTimeline: photo.showOnTimeline,
     seriesId: photo.seriesId,
     seriesReminder: photo.seriesReminder,
+    social: normalizePhotoSocialSettings(photo.social),
   };
 }
 
@@ -564,6 +572,7 @@ async function serverPhotoDtoToPhotoRecord(
     showOnTimeline: dto.showOnTimeline,
     seriesId: dto.seriesId,
     seriesReminder: dto.seriesReminder,
+    social: normalizePhotoSocialSettings(dto.social),
   };
 }
 
@@ -581,6 +590,7 @@ function serverPhotoDtoToPhotoMetadata(dto: ServerPersonalPhotoDto): PhotoRecord
     showOnTimeline: dto.showOnTimeline,
     seriesId: dto.seriesId,
     seriesReminder: dto.seriesReminder,
+    social: normalizePhotoSocialSettings(dto.social),
     hasPreview: !!dto.previewUrl,
   };
 }

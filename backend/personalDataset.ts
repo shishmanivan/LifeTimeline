@@ -5,6 +5,10 @@ import type {
   ListServerSeriesResponse,
   ServerPersonalPhotoDto,
 } from "../src/serverPersonalPhotoStorage";
+import {
+  normalizePhotoSocialSettings,
+  type PhotoSocialSettings,
+} from "../src/photoSocial";
 
 type PreparedSeriesRecord = {
   id: string;
@@ -29,6 +33,7 @@ type PreparedPhotoEntry = {
   showOnTimeline?: boolean;
   seriesId?: string;
   seriesReminder?: boolean;
+  social?: PhotoSocialSettings;
   imageFile: string;
   previewFile?: string;
 };
@@ -67,6 +72,7 @@ export type PreparedPhotoMetadataPatch = {
   offsetY?: number;
   offsetXDays?: number;
   seriesReminder?: boolean;
+  social?: PhotoSocialSettings;
 };
 
 export type PreparedSeriesPatch = {
@@ -165,6 +171,7 @@ function toPhotoDto(
     showOnTimeline: photo.showOnTimeline,
     seriesId: photo.seriesId,
     seriesReminder: photo.seriesReminder,
+    social: normalizePhotoSocialSettings(photo.social),
     imageUrl: buildAssetUrl(publicBaseUrl, "images", imageFileName),
     previewUrl: previewFileName
       ? buildAssetUrl(publicBaseUrl, "previews", previewFileName)
@@ -178,6 +185,7 @@ function normalizePreparedPhotoEntry(
   return {
     ...photo,
     profileId: photo.profileId ?? DEFAULT_PROFILE_ID,
+    social: normalizePhotoSocialSettings(photo.social),
   };
 }
 
@@ -457,6 +465,7 @@ export async function savePreparedPhoto(
   const nextEntry: PreparedPhotoEntry = {
     ...input.metadata,
     profileId: input.metadata.profileId ?? DEFAULT_PROFILE_ID,
+    social: normalizePhotoSocialSettings(input.metadata.social),
     imageFile,
     ...(previewFile ? { previewFile } : {}),
   };

@@ -1,3 +1,5 @@
+import type { PhotoSocialSettings } from "./photoSocial";
+
 export type Offsets = { offsetXDays: number; offsetY: number };
 
 export type PersonalPhoto = {
@@ -13,6 +15,7 @@ export type PersonalPhoto = {
   showOnTimeline?: boolean;
   seriesId?: string;
   seriesReminder?: boolean;
+  social?: PhotoSocialSettings;
 };
 
 export type PositionedPhoto = PersonalPhoto & {

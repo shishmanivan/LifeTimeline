@@ -49,7 +49,6 @@ import { HistoricalEventModal } from "./HistoricalEventModal";
 import { PersonalPhotoModal } from "./PersonalPhotoModal";
 import { DataBackupModal } from "./DataBackupModal";
 import { AdminFunctionsModal } from "./AdminFunctionsModal";
-import { UserSessionSettingsModal } from "./UserSessionSettingsModal";
 import { RecoverAccessCard } from "./RecoverAccessCard";
 import {
   clearActiveBrowserUser,
@@ -65,6 +64,10 @@ import ppyCompactLogoUrl from "../PPY4cut.png";
 import ivanPhotoUrl from "../IvanPhoto.JPG";
 import { googleClientId, hasGoogleAuthConfig } from "./googleAuthConfig";
 import { loadGoogleIdentityScript } from "./googleIdentityScript";
+import {
+  normalizePhotoSocialSettings,
+  type PhotoSocialSettings,
+} from "./photoSocial";
 
 export type { Offsets };
 
@@ -193,6 +196,7 @@ function toPersonalPhoto(
     showOnTimeline: record.showOnTimeline !== false,
     seriesId: record.seriesId,
     seriesReminder: record.seriesReminder,
+    social: normalizePhotoSocialSettings(record.social),
   };
 }
 
@@ -275,6 +279,22 @@ function getGoogleAuthErrorMessage(error: unknown): string {
     return "Не удалось подтвердить вход через Google. Попробуйте еще раз.";
   }
   return "Не удалось войти через Google. Попробуйте еще раз или используйте вход по email.";
+}
+
+function getAccountInitials(email: string): string {
+  const localPart = email.split("@")[0]?.trim() || email.trim();
+  const normalized = localPart.replace(/[._-]+/g, " ");
+  const parts = normalized
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length >= 2) {
+    return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
+  }
+
+  const compact = (parts[0] ?? localPart).replace(/\s+/g, "");
+  return compact.slice(0, 2).toUpperCase() || "?";
 }
 
 type PersistedTimelineState = {
@@ -523,8 +543,8 @@ function App() {
   const lastTrackedOpenPhotoIdRef = useRef<string | null>(null);
   const publicServerReadOnlyUx =
     personalPhotoStorageIsServerMode && !canWrite;
-  const [userSessionSettingsModalOpen, setUserSessionSettingsModalOpen] =
-    useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const [googleScriptStatus, setGoogleScriptStatus] = useState<
     "idle" | "loading" | "loaded" | "error"
   >("idle");
@@ -550,7 +570,7 @@ function App() {
     clearActiveBrowserUser();
     setActiveBrowserUser(null);
     setAuthenticatedUser(null);
-    setUserSessionSettingsModalOpen(false);
+    setAccountMenuOpen(false);
     if (typeof window !== "undefined") {
       window.location.assign("/");
     }
@@ -569,7 +589,7 @@ function App() {
     setActiveBrowserUser(null);
     setRememberedBrowserUser(null);
     setAuthenticatedUser(null);
-    setUserSessionSettingsModalOpen(false);
+    setAccountMenuOpen(false);
   }, []);
   const persisted = useMemo(loadTimelineState, []);
 
@@ -791,6 +811,26 @@ function App() {
     canReplacePhoto && canManageCurrentProfile;
   const canUnlinkSeriesForCurrentView =
     canUnlinkSeries && canManageCurrentProfile;
+  const accountInitials = authenticatedUser
+    ? getAccountInitials(authenticatedUser.email)
+    : "";
+  const ownProfileSlug =
+    authenticatedUser && activeBrowserUser?.userId === authenticatedUser.id
+      ? activeBrowserUser.profileSlug
+      : authenticatedUser && rememberedBrowserUser?.userId === authenticatedUser.id
+        ? rememberedBrowserUser.profileSlug
+        : null;
+  const shouldShowReturnToOwnProfile =
+    Boolean(ownProfileSlug) &&
+    activeProfile !== null &&
+    activeProfile.slug !== ownProfileSlug;
+
+  const handleReturnToOwnProfile = useCallback(() => {
+    if (!ownProfileSlug || typeof window === "undefined") return;
+    setAccountMenuOpen(false);
+    window.location.assign(`/${ownProfileSlug}`);
+  }, [ownProfileSlug]);
+
   const getActiveOffsets = (id: string): Offsets => {
     const p = personalPhotos.find((x) => x.id === id);
     const pend = pendingOffsets[id];
@@ -921,6 +961,29 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const menu = accountMenuRef.current;
+      if (!menu || menu.contains(event.target as Node)) return;
+      setAccountMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setAccountMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [accountMenuOpen]);
 
   useEffect(() => {
     if (!canRenderGoogleButton) {
@@ -2316,7 +2379,13 @@ function App() {
   const handleOverlaySave = useCallback(
     (
       id: string,
-      data: { date: string; title: string; note: string; seriesReminder: boolean }
+      data: {
+        date: string;
+        title: string;
+        note: string;
+        seriesReminder: boolean;
+        social: PhotoSocialSettings;
+      }
     ) => {
       if (!canEditMetadataForCurrentView) return;
       updatePhotoMetadata(id, data)
@@ -2330,6 +2399,7 @@ function App() {
                     title: data.title,
                     note: data.note,
                     seriesReminder: data.seriesReminder,
+                    social: data.social,
                   }
                 : p
             )
@@ -2414,6 +2484,7 @@ function App() {
           showOnTimeline: photo.showOnTimeline,
           seriesId: photo.seriesId,
           seriesReminder: photo.seriesReminder,
+          social: normalizePhotoSocialSettings(photo.social),
         })
       );
       const newRecord: PhotoRecord = {
@@ -2429,6 +2500,7 @@ function App() {
         offsetY: 0,
         offsetXDays: 0,
         showOnTimeline: false,
+        social: normalizePhotoSocialSettings(undefined),
       };
       const withLanes = assignPersonalLaneIndex([
         ...existingRecordsForLaneAssignment,
@@ -2461,6 +2533,7 @@ function App() {
           note: newRecord.note,
           showOnTimeline: false,
           seriesReminder: newRecord.seriesReminder,
+          social: normalizePhotoSocialSettings(newRecord.social),
         },
       ]);
       setOverlayPhotoId(id);
@@ -3092,15 +3165,6 @@ function App() {
               + Добавить фото
             </button>
           )}
-          {authenticatedUser && (
-            <button
-              type="button"
-              className="top-bar-btn"
-              onClick={() => setUserSessionSettingsModalOpen(true)}
-            >
-              Настройки
-            </button>
-          )}
           {isMissingProfileRoute && (
             <div className="top-bar-note">
               Профиль не найден: @{routeProfileSlug}
@@ -3119,6 +3183,68 @@ function App() {
             </div>
           ) : null}
           <div className="scale">Масштаб: {scaleMeta[scale].label}</div>
+          {authenticatedUser && (
+            <div className="account-menu" ref={accountMenuRef}>
+              <button
+                type="button"
+                className="account-avatar-button"
+                onClick={() => setAccountMenuOpen((open) => !open)}
+                aria-label="Открыть меню профиля"
+                aria-haspopup="menu"
+                aria-expanded={accountMenuOpen}
+                title={authenticatedUser.email}
+              >
+                {accountInitials}
+              </button>
+              {accountMenuOpen && (
+                <div className="account-menu-panel" role="menu">
+                  <div className="account-menu-header">
+                    <div className="account-menu-avatar" aria-hidden="true">
+                      {accountInitials}
+                    </div>
+                    <div className="account-menu-user">
+                      <div className="account-menu-email">
+                        {authenticatedUser.email}
+                      </div>
+                      {activeProfile && (
+                        <div className="account-menu-profile">
+                          @{activeProfile.slug}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="account-menu-actions">
+                    {shouldShowReturnToOwnProfile && (
+                      <button
+                        type="button"
+                        className="account-menu-action"
+                        onClick={handleReturnToOwnProfile}
+                        role="menuitem"
+                      >
+                        Вернуться в свой профиль
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="account-menu-action"
+                      onClick={handleBrowserActiveSignOut}
+                      role="menuitem"
+                    >
+                      Выйти
+                    </button>
+                    <button
+                      type="button"
+                      className="account-menu-action account-menu-action-destructive"
+                      onClick={handleForgetThisDevice}
+                      role="menuitem"
+                    >
+                      Забыть это устройство
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
@@ -3157,14 +3283,6 @@ function App() {
         />
       )}
 
-      {userSessionSettingsModalOpen && authenticatedUser && (
-        <UserSessionSettingsModal
-          onClose={() => setUserSessionSettingsModalOpen(false)}
-          onSignOut={handleBrowserActiveSignOut}
-          onForgetDevice={handleForgetThisDevice}
-        />
-      )}
-
       {adminFunctionsModalOpen && canAccessAdminFunctions && (
         <AdminFunctionsModal
           isOpen={adminFunctionsModalOpen}
@@ -3188,6 +3306,7 @@ function App() {
                     note: p.note,
                     seriesId: p.seriesId,
                     seriesReminder: p.seriesReminder,
+                    social: p.social,
                   }
                 : null;
             })()
@@ -3198,6 +3317,7 @@ function App() {
             date: p.date,
             note: p.note,
             seriesReminder: p.seriesReminder,
+            social: p.social,
           }))}
           imageUrl={overlayUrl}
           isOpen={true}

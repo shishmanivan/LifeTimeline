@@ -1,4 +1,9 @@
 import { useEffect, useCallback, useRef, useState } from "react";
+import {
+  CLOSE_REACTION,
+  normalizePhotoSocialSettings,
+  type PhotoSocialSettings,
+} from "./photoSocial";
 
 export type PersonalPhotoForModal = {
   id: string;
@@ -7,6 +12,7 @@ export type PersonalPhotoForModal = {
   note?: string;
   seriesId?: string;
   seriesReminder?: boolean;
+  social?: PhotoSocialSettings;
 };
 
 export type PhotoInSeriesForModal = {
@@ -30,7 +36,13 @@ type PersonalPhotoModalProps = {
   onEdit: () => void;
   onSave: (
     id: string,
-    data: { date: string; title: string; note: string; seriesReminder: boolean }
+    data: {
+      date: string;
+      title: string;
+      note: string;
+      seriesReminder: boolean;
+      social: PhotoSocialSettings;
+    }
   ) => void;
   onRenameSeries: (seriesId: string, title: string) => void | Promise<void>;
   onReplaceImage: (id: string, file: File) => void;
@@ -107,6 +119,9 @@ export function PersonalPhotoModal({
   const [draftTitle, setDraftTitle] = useState("");
   const [draftNote, setDraftNote] = useState("");
   const [draftSeriesReminder, setDraftSeriesReminder] = useState(false);
+  const [draftSocial, setDraftSocial] = useState<PhotoSocialSettings>(
+    normalizePhotoSocialSettings(undefined)
+  );
   const [renamingSeries, setRenamingSeries] = useState(false);
   const [draftSeriesTitle, setDraftSeriesTitle] = useState("");
   const [seriesGalleryOpen, setSeriesGalleryOpen] = useState(false);
@@ -144,6 +159,7 @@ export function PersonalPhotoModal({
       setDraftTitle(photo.title);
       setDraftNote(photo.note ?? "");
       setDraftSeriesReminder(savedSeriesReminder);
+      setDraftSocial(normalizePhotoSocialSettings(photo.social));
       setRenamingSeries(false);
       setSeriesGalleryOpen(false);
     }
@@ -225,6 +241,7 @@ export function PersonalPhotoModal({
         title: draftTitle.trim() || "Фото",
         note: draftNote,
         seriesReminder: canSetSeriesReminder ? draftSeriesReminder : false,
+        social: draftSocial,
       });
     }
   }, [
@@ -233,9 +250,24 @@ export function PersonalPhotoModal({
     draftTitle,
     draftNote,
     draftSeriesReminder,
+    draftSocial,
     canSetSeriesReminder,
     onSave,
   ]);
+
+  const handleAllowReactionsChange = useCallback((enabled: boolean) => {
+    setDraftSocial({
+      reactionsEnabled: enabled,
+      allowedReactions: enabled ? [CLOSE_REACTION] : [],
+    });
+  }, []);
+
+  const handleCloseReactionChange = useCallback((enabled: boolean) => {
+    setDraftSocial((current) => ({
+      ...current,
+      allowedReactions: enabled ? [CLOSE_REACTION] : [],
+    }));
+  }, []);
 
   const handleReplaceImage = useCallback(() => {
     fileInputRef.current?.click();
@@ -380,6 +412,11 @@ export function PersonalPhotoModal({
   }, [isLinkTarget, photo?.id]);
 
   if (!isOpen || !photo) return null;
+
+  const photoSocial = normalizePhotoSocialSettings(photo.social);
+  const canShowCloseReaction =
+    photoSocial.reactionsEnabled &&
+    photoSocial.allowedReactions.includes(CLOSE_REACTION);
 
   if (isLinkSource) {
     return (
@@ -719,6 +756,34 @@ export function PersonalPhotoModal({
                     <span>Поставить напоминание о серии</span>
                   </label>
                 )}
+                <div className="personal-modal-social-settings">
+                  <div className="personal-modal-social-title">Social interaction</div>
+                  <label className="personal-modal-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={draftSocial.reactionsEnabled}
+                      onChange={(e) => handleAllowReactionsChange(e.target.checked)}
+                    />
+                    <span>Allow reactions</span>
+                  </label>
+                  {draftSocial.reactionsEnabled && (
+                    <div className="personal-modal-social-nested">
+                      <div className="personal-modal-social-label">
+                        Allowed reactions
+                      </div>
+                      <label className="personal-modal-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={draftSocial.allowedReactions.includes(CLOSE_REACTION)}
+                          onChange={(e) =>
+                            handleCloseReactionChange(e.target.checked)
+                          }
+                        />
+                        <span>Feels close</span>
+                      </label>
+                    </div>
+                  )}
+                </div>
                 <div className="personal-modal-edit-actions">
                   {disableNonMetadataActions && allowMetadataEdit && (
                     <p className="personal-readonly-note personal-readonly-note-compact">
@@ -853,6 +918,17 @@ export function PersonalPhotoModal({
                 <div className="personal-modal-note-readonly">
                   {photo.note || "—"}
                 </div>
+                {canShowCloseReaction && (
+                  <div className="personal-modal-reactions">
+                    <button
+                      type="button"
+                      className="personal-modal-reaction-placeholder"
+                      disabled
+                    >
+                      Мне это близко
+                    </button>
+                  </div>
+                )}
                 <div className="personal-modal-footer">
                   {disableNonMetadataActions && allowMetadataEdit && (
                     <p className="personal-readonly-note personal-readonly-note-compact">

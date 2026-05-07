@@ -1,5 +1,9 @@
 import type { HistoricalEvent } from "./history/types";
 import { assignHistoricalLanes } from "./history/laneAssignment";
+import {
+  normalizePhotoSocialSettings,
+  type PhotoSocialSettings,
+} from "./photoSocial";
 
 const DB_NAME = "LifeTimelineDB";
 const DB_VERSION = 13;
@@ -33,18 +37,21 @@ export type PhotoRecord = {
   seriesId?: string;
   /** Shows a hint that this text continues the previous photo in the series */
   seriesReminder?: boolean;
+  /** Per-photo social interaction settings. Legacy records default to reactions off. */
+  social?: PhotoSocialSettings;
 };
 
 const DEFAULT_PROFILE_ID = "1";
 
 function normalizePhotoRecord<T extends PhotoRecord | null>(record: T): T {
-  if (!record || record.profileId) {
+  if (!record) {
     return record;
   }
 
   return {
     ...record,
-    profileId: DEFAULT_PROFILE_ID,
+    profileId: record.profileId ?? DEFAULT_PROFILE_ID,
+    social: normalizePhotoSocialSettings(record.social),
   } as T;
 }
 
@@ -235,6 +242,7 @@ export type PhotoMetadataUpdate = {
   title?: string;
   note?: string;
   seriesReminder?: boolean;
+  social?: PhotoSocialSettings;
 };
 
 export async function updatePhotoMetadata(

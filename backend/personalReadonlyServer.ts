@@ -65,6 +65,10 @@ import type {
   UserModel,
   VerifyRecoveryCodeInput,
 } from "../src/userModel";
+import {
+  isPhotoReactionType,
+  type PhotoSocialSettings,
+} from "../src/photoSocial";
 import { getAuthenticatedUserFromRequest } from "./auth/getAuthenticatedUser";
 import { mayUserAdmin, mayUserWriteProfile } from "./auth/mayUserWriteProfile";
 
@@ -217,6 +221,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function parsePhotoSocialSettings(value: unknown): PhotoSocialSettings {
+  if (!isRecord(value)) {
+    throw new Error('Field "social" must be an object.');
+  }
+  if (typeof value.reactionsEnabled !== "boolean") {
+    throw new Error('Field "social.reactionsEnabled" must be a boolean.');
+  }
+  if (!Array.isArray(value.allowedReactions)) {
+    throw new Error('Field "social.allowedReactions" must be an array.');
+  }
+
+  const allowedReactions = value.allowedReactions.map((reaction) => {
+    if (!isPhotoReactionType(reaction)) {
+      throw new Error(`Unsupported photo reaction "${String(reaction)}".`);
+    }
+    return reaction;
+  });
+
+  return {
+    reactionsEnabled: value.reactionsEnabled,
+    allowedReactions: value.reactionsEnabled
+      ? Array.from(new Set(allowedReactions))
+      : [],
+  };
+}
+
 function isValidDateOnly(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00Z`);
@@ -254,6 +284,7 @@ function parsePhotoMetadataPatch(body: unknown): PreparedPhotoMetadataPatch {
     "offsetY",
     "offsetXDays",
     "seriesReminder",
+    "social",
   ]);
 
   for (const key of Object.keys(body)) {
@@ -309,6 +340,10 @@ function parsePhotoMetadataPatch(body: unknown): PreparedPhotoMetadataPatch {
       throw new Error('Field "seriesReminder" must be a boolean.');
     }
     patch.seriesReminder = body.seriesReminder;
+  }
+
+  if ("social" in body) {
+    patch.social = parsePhotoSocialSettings(body.social);
   }
 
   if (Object.keys(patch).length === 0) {
@@ -569,6 +604,7 @@ function parsePhotoUpsertMetadata(
     "showOnTimeline",
     "seriesId",
     "seriesReminder",
+    "social",
   ]);
   for (const key of Object.keys(body)) {
     if (!allowedKeys.has(key)) {
@@ -666,6 +702,10 @@ function parsePhotoUpsertMetadata(
       throw new Error('Field "seriesReminder" must be a boolean.');
     }
     metadata.seriesReminder = body.seriesReminder;
+  }
+
+  if ("social" in body) {
+    metadata.social = parsePhotoSocialSettings(body.social);
   }
 
   return metadata;
@@ -1328,6 +1368,26 @@ if (req.method === "GET" && profilePhotosMatch) {
       requestProfile ? profileAssetBasePath(requestProfile) : personalAssetBasePath()
     );
     sendJson(res, 200, dataset.photosResponse);
+    return;
+  }
+
+  const personalPhotoReadMatch = pathname.match(
+    /^\/api\/personal\/photos\/([^/]+)$/
+  );
+  if (personalPhotoReadMatch) {
+    const photoId = decodeURIComponent(personalPhotoReadMatch[1]);
+    const requestProfile = await getAuthenticatedPrimaryProfile(authUser);
+    const dataset = await readPreparedPersonalDataset(
+      requestProfile ? profileDatasetDir(requestProfile) : personalPreparedDatasetDir(),
+      requestProfile ? profileAssetBasePath(requestProfile) : personalAssetBasePath()
+    );
+    const photo = dataset.photosResponse.photos.find((item) => item.id === photoId);
+    if (!photo) {
+      sendText(res, 404, "Photo not found.");
+      return;
+    }
+
+    sendJson(res, 200, { photo });
     return;
   }
 

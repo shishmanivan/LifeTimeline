@@ -1140,7 +1140,7 @@ function App() {
   return (
     <div className="page" onWheel={onWheel}>
       <header className="top-bar">
-        <h1>Timeline MVP</h1>
+        <h1>Your Place in Time</h1>
         <div className="top-bar-right">
           <button
             type="button"
