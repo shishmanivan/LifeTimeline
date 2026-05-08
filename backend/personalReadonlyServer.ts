@@ -14,6 +14,7 @@ import {
   ensurePreparedPersonalDataset,
   readPreparedPhotoProfileId,
   readPreparedPhotoProfileIdsInDay,
+  readPreparedPhotoSocialRecord,
   readPreparedPersonalDataset,
   readPreparedSeries,
   replacePreparedPhotoImage,
@@ -27,6 +28,7 @@ import {
   type PreparedPhotoMetadataPatch,
   type PreparedSeriesPatch,
   type PersonalAssetKind,
+  type PreparedPhotoSocialRecord,
 } from "./personalDataset";
 import {
   resolvePreparedPersonalDataDir,
@@ -54,6 +56,11 @@ import {
   recordPhotoView,
   type PhotoViewIdentity,
 } from "./photoViewStore";
+import {
+  deleteClosePhotoReaction,
+  putClosePhotoReaction,
+  readPhotoReactionSummary,
+} from "./socialReactionStore";
 import type { ProfileModel } from "../src/profileModel";
 import { getProfileDatasetProfileId } from "../src/profileModel";
 import type {
@@ -66,7 +73,9 @@ import type {
   VerifyRecoveryCodeInput,
 } from "../src/userModel";
 import {
+  CLOSE_REACTION,
   isPhotoReactionType,
+  normalizePhotoSocialSettings,
   type PhotoSocialSettings,
 } from "../src/photoSocial";
 import { getAuthenticatedUserFromRequest } from "./auth/getAuthenticatedUser";
@@ -76,6 +85,20 @@ type PersonalReadonlyServerConfig = {
   host: string;
   port: number;
   publicBaseUrl?: string;
+};
+
+type SocialPhotoReactionResponse = {
+  counts: {
+    close: number;
+  };
+  viewerReaction: "close" | null;
+  reactionsEnabled: boolean;
+  allowedReactions: "close"[];
+};
+
+type SocialPhotoLookupResult = {
+  photo: PreparedPhotoSocialRecord;
+  dataDir: string;
 };
 
 function personalPreparedDatasetDir(
@@ -173,6 +196,65 @@ async function getAuthenticatedPrimaryProfile(
   authUser: UserModel | null
 ): Promise<ProfileModel | null> {
   return await resolveProfileByAnyProfileId(authUser?.primaryProfileId);
+}
+
+async function findPreparedPhotoForSocial(
+  photoId: string
+): Promise<SocialPhotoLookupResult | null> {
+  const store = await readIdentityStore();
+  const candidateDirs = new Set<string>();
+  for (const profile of store.profiles) {
+    candidateDirs.add(profileDatasetDir(profile));
+  }
+  candidateDirs.add(personalPreparedDatasetDir());
+
+  for (const dataDir of candidateDirs) {
+    const photo = await readPreparedPhotoSocialRecord(dataDir, photoId);
+    if (photo) {
+      return { photo, dataDir };
+    }
+  }
+
+  return null;
+}
+
+function getAllowedSocialReactions(
+  photo: Pick<PreparedPhotoSocialRecord, "social">
+): "close"[] {
+  const social = normalizePhotoSocialSettings(photo.social);
+  return social.reactionsEnabled && social.allowedReactions.includes(CLOSE_REACTION)
+    ? [CLOSE_REACTION]
+    : [];
+}
+
+function areCloseReactionsAllowed(
+  photo: Pick<PreparedPhotoSocialRecord, "social">
+): boolean {
+  return getAllowedSocialReactions(photo).includes(CLOSE_REACTION);
+}
+
+async function buildSocialPhotoReactionResponse(
+  photo: PreparedPhotoSocialRecord,
+  authUser: UserModel | null
+): Promise<SocialPhotoReactionResponse> {
+  const allowedReactions = getAllowedSocialReactions(photo);
+  const reactionsEnabled = allowedReactions.includes(CLOSE_REACTION);
+  if (!reactionsEnabled) {
+    return {
+      counts: { close: 0 },
+      viewerReaction: null,
+      reactionsEnabled: false,
+      allowedReactions: [],
+    };
+  }
+
+  const summary = await readPhotoReactionSummary(photo.id, authUser?.id ?? null);
+  return {
+    counts: summary.counts,
+    viewerReaction: summary.viewerReaction,
+    reactionsEnabled: true,
+    allowedReactions,
+  };
 }
 
 function readWriteDatasetDirForProfile(profile: ProfileModel): string {
@@ -1033,6 +1115,92 @@ async function handleRequest(
       });
       return;
     }
+  }
+
+  const socialPhotoReactionsMatch = pathname.match(
+    /^\/api\/social\/photos\/([^/]+)\/reactions$/
+  );
+  if (socialPhotoReactionsMatch) {
+    const photoId = decodeURIComponent(socialPhotoReactionsMatch[1]).trim();
+    if (!photoId) {
+      sendJson(res, 400, {
+        error: "invalid-input",
+        message: "Photo id is required.",
+      });
+      return;
+    }
+    if (req.method !== "GET") {
+      sendText(res, 405, "Method not allowed.");
+      return;
+    }
+
+    const lookup = await findPreparedPhotoForSocial(photoId);
+    if (!lookup) {
+      sendText(res, 404, "Photo not found.");
+      return;
+    }
+
+    sendJson(
+      res,
+      200,
+      await buildSocialPhotoReactionResponse(lookup.photo, authUser)
+    );
+    return;
+  }
+
+  const closeReactionMatch = pathname.match(
+    /^\/api\/social\/photos\/([^/]+)\/reactions\/close$/
+  );
+  if (closeReactionMatch) {
+    const photoId = decodeURIComponent(closeReactionMatch[1]).trim();
+    if (!photoId) {
+      sendJson(res, 400, {
+        error: "invalid-input",
+        message: "Photo id is required.",
+      });
+      return;
+    }
+    if (req.method !== "PUT" && req.method !== "DELETE") {
+      sendText(res, 405, "Method not allowed.");
+      return;
+    }
+    if (!authUser) {
+      sendText(res, 403, "Sign in is required to react.");
+      return;
+    }
+
+    const lookup = await findPreparedPhotoForSocial(photoId);
+    if (!lookup) {
+      sendText(res, 404, "Photo not found.");
+      return;
+    }
+    if (!areCloseReactionsAllowed(lookup.photo)) {
+      sendJson(res, 409, {
+        error: "reactions-disabled",
+        message: "Reactions are not enabled for this photo.",
+      });
+      return;
+    }
+
+    if (req.method === "PUT") {
+      await putClosePhotoReaction({
+        profileId: lookup.photo.profileId,
+        photoId: lookup.photo.id,
+        userId: authUser.id,
+      });
+    } else {
+      await deleteClosePhotoReaction({
+        photoId: lookup.photo.id,
+        userId: authUser.id,
+      });
+    }
+
+    sendJson(
+      res,
+      200,
+      await buildSocialPhotoReactionResponse(lookup.photo, authUser)
+    );
+    return;
   }
 
   const photosByDateMatch = pathname.match(/^\/api\/personal\/photos\/by-date\/([^/]+)$/);

@@ -4,6 +4,13 @@ import {
   normalizePhotoSocialSettings,
   type PhotoSocialSettings,
 } from "./photoSocial";
+import { CloseToMeReactionIcon } from "./CloseToMeReactionIcon";
+import {
+  deleteClosePhotoReactionViaServer,
+  getPhotoReactionsViaServer,
+  putClosePhotoReactionViaServer,
+  type GetPhotoReactionsResponse,
+} from "./serverPersonalPhotoStorage";
 
 export type PersonalPhotoForModal = {
   id: string;
@@ -64,6 +71,7 @@ type PersonalPhotoModalProps = {
   allowDeleteAllPhotosInDay?: boolean;
   allowSeriesLinking?: boolean;
   allowSeriesUnlinking?: boolean;
+  isAuthenticated?: boolean;
   adminPhotoViewCount?: number | null;
   disabledActionsMessage?: string;
 };
@@ -111,6 +119,7 @@ export function PersonalPhotoModal({
   allowDeleteAllPhotosInDay = false,
   allowSeriesLinking = false,
   allowSeriesUnlinking = false,
+  isAuthenticated = false,
   adminPhotoViewCount = null,
   disabledActionsMessage = "Server mode: image/add/delete actions are still disabled for now",
 }: PersonalPhotoModalProps) {
@@ -122,6 +131,16 @@ export function PersonalPhotoModal({
   const [draftSocial, setDraftSocial] = useState<PhotoSocialSettings>(
     normalizePhotoSocialSettings(undefined)
   );
+  const [closeReactionAnimationVisible, setCloseReactionAnimationVisible] =
+    useState(false);
+  const [closeReactionAnimationActive, setCloseReactionAnimationActive] =
+    useState(false);
+  const [closeReactionState, setCloseReactionState] =
+    useState<GetPhotoReactionsResponse | null>(null);
+  const [closeReactionLoading, setCloseReactionLoading] = useState(false);
+  const [closeReactionMessage, setCloseReactionMessage] = useState("");
+  const closeReactionAnimationTimerRef = useRef<number | null>(null);
+  const closeReactionAnimationFrameRef = useRef<number | null>(null);
   const [renamingSeries, setRenamingSeries] = useState(false);
   const [draftSeriesTitle, setDraftSeriesTitle] = useState("");
   const [seriesGalleryOpen, setSeriesGalleryOpen] = useState(false);
@@ -160,10 +179,25 @@ export function PersonalPhotoModal({
       setDraftNote(photo.note ?? "");
       setDraftSeriesReminder(savedSeriesReminder);
       setDraftSocial(normalizePhotoSocialSettings(photo.social));
+      setCloseReactionAnimationVisible(false);
+      setCloseReactionAnimationActive(false);
+      setCloseReactionState(null);
+      setCloseReactionMessage("");
       setRenamingSeries(false);
       setSeriesGalleryOpen(false);
     }
   }, [isOpen, photo?.id, savedSeriesReminder]);
+
+  useEffect(() => {
+    return () => {
+      if (closeReactionAnimationTimerRef.current !== null) {
+        window.clearTimeout(closeReactionAnimationTimerRef.current);
+      }
+      if (closeReactionAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(closeReactionAnimationFrameRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen || photosInSeries.length <= 1) {
@@ -268,6 +302,70 @@ export function PersonalPhotoModal({
       allowedReactions: enabled ? [CLOSE_REACTION] : [],
     }));
   }, []);
+
+  const playCloseReactionAnimation = useCallback(() => {
+    if (closeReactionAnimationTimerRef.current !== null) {
+      window.clearTimeout(closeReactionAnimationTimerRef.current);
+    }
+    if (closeReactionAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(closeReactionAnimationFrameRef.current);
+    }
+
+    setCloseReactionAnimationActive(false);
+    setCloseReactionAnimationVisible(true);
+
+    closeReactionAnimationFrameRef.current = window.requestAnimationFrame(() => {
+      closeReactionAnimationFrameRef.current = window.requestAnimationFrame(() => {
+        setCloseReactionAnimationActive(true);
+      });
+    });
+
+    closeReactionAnimationTimerRef.current = window.setTimeout(() => {
+      setCloseReactionAnimationActive(false);
+      setCloseReactionAnimationVisible(false);
+      closeReactionAnimationTimerRef.current = null;
+    }, 1200);
+  }, []);
+
+  const handleCloseReactionClick = useCallback(async () => {
+    if (!photo || closeReactionLoading) return;
+    if (!isAuthenticated) {
+      setCloseReactionMessage("Войдите, чтобы оставить реакцию");
+      return;
+    }
+
+    setCloseReactionLoading(true);
+    setCloseReactionMessage("");
+    try {
+      const currentReaction = closeReactionState?.viewerReaction ?? null;
+      const nextState =
+        currentReaction === CLOSE_REACTION
+          ? await deleteClosePhotoReactionViaServer(photo.id)
+          : await putClosePhotoReactionViaServer(photo.id);
+      setCloseReactionState(nextState);
+      if (currentReaction !== CLOSE_REACTION && nextState.viewerReaction === CLOSE_REACTION) {
+        playCloseReactionAnimation();
+      }
+    } catch (err) {
+      console.error("[reactions] close reaction toggle failed", err);
+      setCloseReactionMessage("Не удалось сохранить реакцию. Попробуйте ещё раз.");
+    } finally {
+      setCloseReactionLoading(false);
+    }
+  }, [
+    photo,
+    closeReactionLoading,
+    isAuthenticated,
+    closeReactionState?.viewerReaction,
+    playCloseReactionAnimation,
+  ]);
+
+  const stopReactionEventPropagation = useCallback(
+    (event: React.SyntheticEvent) => {
+      event.stopPropagation();
+    },
+    []
+  );
 
   const handleReplaceImage = useCallback(() => {
     fileInputRef.current?.click();
@@ -406,17 +504,47 @@ export function PersonalPhotoModal({
     photo.id !== linkingSourcePhotoId;
   const isLinkSource =
     isLinkingMode && linkingSourcePhotoId && photo?.id === linkingSourcePhotoId;
+  const photoSocial = normalizePhotoSocialSettings(photo?.social);
+  const canShowCloseReaction =
+    photoSocial.reactionsEnabled &&
+    photoSocial.allowedReactions.includes(CLOSE_REACTION);
+  const closeReactionCount = closeReactionState?.counts.close ?? 0;
+  const closeReactionIsActive =
+    closeReactionState?.viewerReaction === CLOSE_REACTION;
 
   useEffect(() => {
     if (isLinkTarget) setLinkStep("confirm");
   }, [isLinkTarget, photo?.id]);
 
-  if (!isOpen || !photo) return null;
+  useEffect(() => {
+    if (!photo || !canShowCloseReaction) {
+      setCloseReactionState(null);
+      setCloseReactionMessage("");
+      return;
+    }
 
-  const photoSocial = normalizePhotoSocialSettings(photo.social);
-  const canShowCloseReaction =
-    photoSocial.reactionsEnabled &&
-    photoSocial.allowedReactions.includes(CLOSE_REACTION);
+    let cancelled = false;
+    setCloseReactionState(null);
+    setCloseReactionMessage("");
+    getPhotoReactionsViaServer(photo.id)
+      .then((state) => {
+        if (!cancelled) {
+          setCloseReactionState(state);
+        }
+      })
+      .catch((err) => {
+        console.error("[reactions] close reaction load failed", err);
+        if (!cancelled) {
+          setCloseReactionMessage("Не удалось загрузить реакции.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [photo?.id, canShowCloseReaction]);
+
+  if (!isOpen || !photo) return null;
 
   if (isLinkSource) {
     return (
@@ -653,6 +781,46 @@ export function PersonalPhotoModal({
                 </button>
               </div>
             )}
+            {canShowCloseReaction && !isEditMode && (
+              <div
+                className="personal-modal-reactions personal-modal-reactions-on-photo"
+                onClick={stopReactionEventPropagation}
+                onPointerDown={stopReactionEventPropagation}
+                onTouchStart={stopReactionEventPropagation}
+              >
+                {closeReactionAnimationVisible && (
+                  <div className="personal-modal-reaction-burst" aria-hidden="true">
+                    <CloseToMeReactionIcon active={closeReactionAnimationActive} />
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className={`personal-modal-reaction-placeholder ${
+                    closeReactionIsActive
+                      ? "personal-modal-reaction-placeholder-active"
+                      : ""
+                  }`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleCloseReactionClick();
+                  }}
+                  disabled={closeReactionLoading}
+                  aria-pressed={closeReactionIsActive}
+                >
+                  Мне это близко
+                  {closeReactionCount > 0 ? (
+                    <span className="personal-modal-reaction-count">
+                      · {closeReactionCount}
+                    </span>
+                  ) : null}
+                </button>
+                {closeReactionMessage ? (
+                  <div className="personal-modal-reaction-message" role="status">
+                    {closeReactionMessage}
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <div
@@ -757,20 +925,16 @@ export function PersonalPhotoModal({
                   </label>
                 )}
                 <div className="personal-modal-social-settings">
-                  <div className="personal-modal-social-title">Social interaction</div>
                   <label className="personal-modal-checkbox">
                     <input
                       type="checkbox"
                       checked={draftSocial.reactionsEnabled}
                       onChange={(e) => handleAllowReactionsChange(e.target.checked)}
                     />
-                    <span>Allow reactions</span>
+                    <span>Разрешить реакции</span>
                   </label>
                   {draftSocial.reactionsEnabled && (
                     <div className="personal-modal-social-nested">
-                      <div className="personal-modal-social-label">
-                        Allowed reactions
-                      </div>
                       <label className="personal-modal-checkbox">
                         <input
                           type="checkbox"
@@ -779,7 +943,7 @@ export function PersonalPhotoModal({
                             handleCloseReactionChange(e.target.checked)
                           }
                         />
-                        <span>Feels close</span>
+                        <span>Мне это близко</span>
                       </label>
                     </div>
                   )}
@@ -918,17 +1082,6 @@ export function PersonalPhotoModal({
                 <div className="personal-modal-note-readonly">
                   {photo.note || "—"}
                 </div>
-                {canShowCloseReaction && (
-                  <div className="personal-modal-reactions">
-                    <button
-                      type="button"
-                      className="personal-modal-reaction-placeholder"
-                      disabled
-                    >
-                      Мне это близко
-                    </button>
-                  </div>
-                )}
                 <div className="personal-modal-footer">
                   {disableNonMetadataActions && allowMetadataEdit && (
                     <p className="personal-readonly-note personal-readonly-note-compact">

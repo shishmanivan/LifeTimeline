@@ -38,6 +38,11 @@ type PreparedPhotoEntry = {
   previewFile?: string;
 };
 
+export type PreparedPhotoSocialRecord = Pick<
+  PreparedPhotoEntry,
+  "id" | "profileId" | "social"
+>;
+
 export type PreparedPhotoUpsertMetadata = Omit<
   PreparedPhotoEntry,
   "imageFile" | "previewFile" | "profileId"
@@ -278,6 +283,21 @@ export async function readPreparedPhotoProfileId(
   const manifest = await readPreparedManifest(dataDir);
   const photo = manifest.photos.find((item) => item.id === photoId);
   return photo?.profileId ?? null;
+}
+
+export async function readPreparedPhotoSocialRecord(
+  dataDir: string,
+  photoId: string
+): Promise<PreparedPhotoSocialRecord | null> {
+  const manifest = await readPreparedManifest(dataDir);
+  const photo = manifest.photos.find((item) => item.id === photoId);
+  return photo
+    ? {
+        id: photo.id,
+        profileId: photo.profileId,
+        social: photo.social,
+      }
+    : null;
 }
 
 export async function readPreparedPhotoProfileIdsInDay(

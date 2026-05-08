@@ -3366,6 +3366,7 @@ function App() {
           allowDeleteAllPhotosInDay={canDeleteAllPhotosInDayForCurrentView}
           allowSeriesLinking={canLinkSeriesForCurrentView}
           allowSeriesUnlinking={canUnlinkSeriesForCurrentView}
+          isAuthenticated={authenticatedUser !== null}
           adminPhotoViewCount={
             isAuthenticatedAdmin ? adminOverlayPhotoViewCount : null
           }
