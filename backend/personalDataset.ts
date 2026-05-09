@@ -1,5 +1,6 @@
 import path from "node:path";
-import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import type {
   ListServerPersonalPhotosResponse,
   ListServerSeriesResponse,
@@ -7,6 +8,7 @@ import type {
 } from "../src/serverPersonalPhotoStorage";
 import {
   normalizePhotoSocialSettings,
+  type PhotoImportSourceMetadata,
   type PhotoSocialSettings,
 } from "../src/photoSocial";
 
@@ -34,6 +36,7 @@ type PreparedPhotoEntry = {
   seriesId?: string;
   seriesReminder?: boolean;
   social?: PhotoSocialSettings;
+  source?: PhotoImportSourceMetadata;
   imageFile: string;
   previewFile?: string;
 };
@@ -93,6 +96,22 @@ export type SavePreparedPhotoInput = {
 export type ReplacePreparedPhotoImageInput = {
   image: PreparedUploadedAsset;
   preview?: PreparedUploadedAsset;
+};
+
+export type ImportPreparedPhotosInput = {
+  sourceDataDir: string;
+  sourcePhotoId: string;
+  sourceProfileId: string;
+  sourceProfileSlug: string;
+  sourceAuthorName: string;
+  targetProfileId: string;
+  includeText: boolean;
+  includeAllPhotosOfDay: boolean;
+};
+
+export type ImportPreparedPhotosResult = {
+  createdPhotoIds: string[];
+  skippedPhotoIds: string[];
 };
 
 export const DEFAULT_PERSONAL_DATA_DIR = path.resolve(
@@ -177,6 +196,7 @@ function toPhotoDto(
     seriesId: photo.seriesId,
     seriesReminder: photo.seriesReminder,
     social: normalizePhotoSocialSettings(photo.social),
+    source: photo.source,
     imageUrl: buildAssetUrl(publicBaseUrl, "images", imageFileName),
     previewUrl: previewFileName
       ? buildAssetUrl(publicBaseUrl, "previews", previewFileName)
@@ -192,6 +212,46 @@ function normalizePreparedPhotoEntry(
     profileId: photo.profileId ?? DEFAULT_PROFILE_ID,
     social: normalizePhotoSocialSettings(photo.social),
   };
+}
+
+function assertPreparedAssetRelativePath(
+  relativePath: string,
+  expectedDir: PersonalAssetKind
+): string {
+  const normalized = normalizeRelativePath(relativePath);
+  if (!new RegExp(`^${expectedDir}/[^/]+$`).test(normalized)) {
+    throw new Error(`Invalid ${expectedDir} asset path "${relativePath}".`);
+  }
+  return normalized;
+}
+
+function buildCopiedAssetFileName(photoId: string, sourceRelativePath: string): string {
+  const ext = path.extname(sourceRelativePath).toLowerCase();
+  return `${photoId}${ALLOWED_ASSET_EXTENSIONS.has(ext) ? ext : ".bin"}`;
+}
+
+async function copyPreparedAsset(
+  sourceDataDir: string,
+  targetDataDir: string,
+  kind: PersonalAssetKind,
+  sourceRelativePath: string,
+  targetPhotoId: string
+): Promise<string> {
+  const normalizedSourcePath = assertPreparedAssetRelativePath(
+    sourceRelativePath,
+    kind
+  );
+  const targetFileName = buildCopiedAssetFileName(
+    targetPhotoId,
+    normalizedSourcePath
+  );
+  const targetRelativePath = `${kind}/${targetFileName}`;
+  await mkdir(path.join(targetDataDir, kind), { recursive: true });
+  await copyFile(
+    path.join(sourceDataDir, normalizedSourcePath),
+    path.join(targetDataDir, targetRelativePath)
+  );
+  return targetRelativePath;
 }
 
 function inferPreparedSeriesProfileId(
@@ -362,6 +422,104 @@ export async function readPreparedPersonalDataset(
         normalizePreparedSeriesRecord(series, manifest.photos)
       ),
     },
+  };
+}
+
+export async function importPreparedPhotos(
+  targetDataDir: string,
+  input: ImportPreparedPhotosInput
+): Promise<ImportPreparedPhotosResult> {
+  const [sourceManifest, targetManifest] = await Promise.all([
+    readPreparedManifest(input.sourceDataDir),
+    readPreparedManifest(targetDataDir),
+  ]);
+  const selectedSourcePhoto = sourceManifest.photos.find(
+    (photo) =>
+      photo.id === input.sourcePhotoId &&
+      photo.profileId === input.sourceProfileId
+  );
+  if (!selectedSourcePhoto) {
+    throw new Error("Source photo not found.");
+  }
+
+  const sourcePhotos = input.includeAllPhotosOfDay
+    ? sourceManifest.photos.filter(
+        (photo) =>
+          photo.profileId === input.sourceProfileId &&
+          photo.date === selectedSourcePhoto.date
+      )
+    : [selectedSourcePhoto];
+  const copiedAt = new Date().toISOString();
+  const createdPhotoIds: string[] = [];
+  const skippedPhotoIds: string[] = [];
+
+  for (const sourcePhoto of sourcePhotos) {
+    const existing = targetManifest.photos.find(
+      (photo) =>
+        photo.profileId === input.targetProfileId &&
+        photo.source?.kind === "imported-photo" &&
+        photo.source.sourcePhotoId === sourcePhoto.id
+    );
+    if (existing) {
+      skippedPhotoIds.push(existing.id);
+      continue;
+    }
+
+    const id = randomUUID();
+    const imageFile = await copyPreparedAsset(
+      input.sourceDataDir,
+      targetDataDir,
+      "images",
+      sourcePhoto.imageFile,
+      id
+    );
+    const previewFile = sourcePhoto.previewFile
+      ? await copyPreparedAsset(
+          input.sourceDataDir,
+          targetDataDir,
+          "previews",
+          sourcePhoto.previewFile,
+          id
+        )
+      : undefined;
+
+    targetManifest.photos.push({
+      id,
+      title: sourcePhoto.title,
+      date: sourcePhoto.date,
+      type: "personal",
+      profileId: input.targetProfileId,
+      note: input.includeText ? sourcePhoto.note : "",
+      offsetY: sourcePhoto.offsetY,
+      offsetXDays: sourcePhoto.offsetXDays,
+      laneIndex: sourcePhoto.laneIndex,
+      showOnTimeline: sourcePhoto.showOnTimeline,
+      social: {
+        reactionsEnabled: false,
+        allowedReactions: [],
+      },
+      source: {
+        kind: "imported-photo",
+        sourcePhotoId: sourcePhoto.id,
+        sourceProfileId: input.sourceProfileId,
+        sourceProfileSlug: input.sourceProfileSlug,
+        sourceAuthorName: input.sourceAuthorName,
+        copiedAt,
+        copiedText: input.includeText,
+      },
+      imageFile,
+      ...(previewFile ? { previewFile } : {}),
+    });
+    createdPhotoIds.push(id);
+  }
+
+  if (createdPhotoIds.length > 0) {
+    await writePreparedManifest(targetDataDir, targetManifest);
+  }
+
+  return {
+    createdPhotoIds,
+    skippedPhotoIds,
   };
 }
 

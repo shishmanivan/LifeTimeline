@@ -12,6 +12,7 @@ import {
   deletePreparedPhotosInDay,
   deletePreparedPhoto,
   ensurePreparedPersonalDataset,
+  importPreparedPhotos,
   readPreparedPhotoProfileId,
   readPreparedPhotoProfileIdsInDay,
   readPreparedPhotoSocialRecord,
@@ -62,7 +63,7 @@ import {
   readPhotoReactionSummary,
 } from "./socialReactionStore";
 import type { ProfileModel } from "../src/profileModel";
-import { getProfileDatasetProfileId } from "../src/profileModel";
+import { getProfileDatasetProfileId, isProfileAvailable } from "../src/profileModel";
 import type {
   CurrentAuthenticatedUserResult,
   GoogleAuthInput,
@@ -98,6 +99,16 @@ type SocialPhotoReactionResponse = {
 
 type SocialPhotoLookupResult = {
   photo: PreparedPhotoSocialRecord;
+  dataDir: string;
+};
+
+type ImportPhotoRequest = {
+  includeText: boolean;
+  includeAllPhotosOfDay: boolean;
+};
+
+type ImportSourcePhotoLookupResult = {
+  profile: ProfileModel;
   dataDir: string;
 };
 
@@ -641,6 +652,64 @@ function parsePhotoViewIdentity(
     type: "anonymous",
     viewerId,
   };
+}
+
+function parseImportPhotoRequest(body: unknown): ImportPhotoRequest {
+  if (!isRecord(body)) {
+    throw new Error("Import body must be a JSON object.");
+  }
+  const allowedKeys = new Set(["includeText", "includeAllPhotosOfDay"]);
+  for (const key of Object.keys(body)) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`Unsupported import field "${key}".`);
+    }
+  }
+  if (typeof body.includeText !== "boolean") {
+    throw new Error('Field "includeText" must be a boolean.');
+  }
+  if (typeof body.includeAllPhotosOfDay !== "boolean") {
+    throw new Error('Field "includeAllPhotosOfDay" must be a boolean.');
+  }
+  return {
+    includeText: body.includeText,
+    includeAllPhotosOfDay: body.includeAllPhotosOfDay,
+  };
+}
+
+async function findVisibleSourcePhotoProfile(
+  photoId: string
+): Promise<ImportSourcePhotoLookupResult | null> {
+  const store = await readIdentityStore();
+  for (const profile of store.profiles) {
+    if (!isProfileAvailable(profile)) {
+      continue;
+    }
+    const dataDir = profileDatasetDir(profile);
+    const dataset = await readPreparedPersonalDataset(
+      dataDir,
+      profileAssetBasePath(profile)
+    );
+    const datasetProfileId = getProfileDatasetProfileId(profile);
+    if (
+      dataset.photosResponse.photos.some(
+        (photo) => photo.id === photoId && photo.profileId === datasetProfileId
+      )
+    ) {
+      return { profile, dataDir };
+    }
+  }
+
+  return null;
+}
+
+async function getSourceAuthorName(sourceProfile: ProfileModel): Promise<string> {
+  const store = await readIdentityStore();
+  const sourceOwner = store.users.find((user) => user.id === sourceProfile.ownerUserId);
+  return (
+    sourceProfile.displayName?.trim() ||
+    sourceOwner?.email?.trim() ||
+    "Unknown author"
+  );
 }
 
 async function readMultipartFormData(req: IncomingMessage): Promise<FormData> {
@@ -1250,6 +1319,73 @@ async function handleRequest(
 
     const deletedPhotoIds = await deletePreparedPhotosInDay(requestDataDir, date);
     sendJson(res, 200, { deletedPhotoIds });
+    return;
+  }
+
+  const photoImportMatch = pathname.match(
+    /^\/api\/personal\/photos\/([^/]+)\/import$/
+  );
+  if (req.method === "POST" && photoImportMatch) {
+    const sourcePhotoId = decodeURIComponent(photoImportMatch[1]).trim();
+    if (!sourcePhotoId) {
+      sendJson(res, 400, {
+        error: "invalid-input",
+        message: "Photo id is required.",
+      });
+      return;
+    }
+    if (!authUser) {
+      sendText(res, 403, "Sign in is required to import a photo.");
+      return;
+    }
+
+    let importRequest: ImportPhotoRequest;
+    try {
+      importRequest = parseImportPhotoRequest(await readJsonBody(req));
+    } catch (error) {
+      sendJson(res, 400, {
+        error: "invalid-input",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    const targetProfile = await getAuthenticatedPrimaryProfile(authUser);
+    if (!targetProfile) {
+      sendText(res, 403, "Write access is limited to the current user's profile.");
+      return;
+    }
+
+    const sourceLookup = await findVisibleSourcePhotoProfile(sourcePhotoId);
+    if (!sourceLookup) {
+      sendText(res, 404, "Photo not found.");
+      return;
+    }
+
+    const targetDataDir = readWriteDatasetDirForProfile(targetProfile);
+    await ensurePreparedPersonalDataset(targetDataDir);
+    const result = await importPreparedPhotos(targetDataDir, {
+      sourceDataDir: sourceLookup.dataDir,
+      sourcePhotoId,
+      sourceProfileId: getProfileDatasetProfileId(sourceLookup.profile),
+      sourceProfileSlug: sourceLookup.profile.slug,
+      sourceAuthorName: await getSourceAuthorName(sourceLookup.profile),
+      targetProfileId: getProfileDatasetProfileId(targetProfile),
+      includeText: importRequest.includeText,
+      includeAllPhotosOfDay: importRequest.includeAllPhotosOfDay,
+    });
+
+    const dataset = await readPreparedPersonalDataset(
+      targetDataDir,
+      profileAssetBasePath(targetProfile)
+    );
+    const byId = new Map(
+      dataset.photosResponse.photos.map((photo) => [photo.id, photo])
+    );
+    sendJson(res, 200, {
+      created: result.createdPhotoIds.map((id) => byId.get(id)).filter(Boolean),
+      skipped: result.skippedPhotoIds.map((id) => byId.get(id)).filter(Boolean),
+    });
     return;
   }
 

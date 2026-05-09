@@ -12,6 +12,7 @@ import type { ProfileModel } from "./profileModel";
 import {
   CLOSE_REACTION,
   normalizePhotoSocialSettings,
+  type PhotoImportSourceMetadata,
   type PhotoReactionType,
   type PhotoSocialSettings,
 } from "./photoSocial";
@@ -67,6 +68,7 @@ type ServerPhotoFields = {
   seriesId?: string;
   seriesReminder?: boolean;
   social?: PhotoSocialSettings;
+  source?: PhotoImportSourceMetadata;
 };
 
 /**
@@ -134,6 +136,16 @@ export type GetPhotoReactionsResponse = {
   viewerReaction: PhotoReactionType | null;
   reactionsEnabled: boolean;
   allowedReactions: PhotoReactionType[];
+};
+
+export type ImportPhotoToMyTimelineRequest = {
+  includeText: boolean;
+  includeAllPhotosOfDay: boolean;
+};
+
+export type ImportPhotoToMyTimelineResponse = {
+  created: ServerPersonalPhotoDto[];
+  skipped: ServerPersonalPhotoDto[];
 };
 
 /**
@@ -452,6 +464,34 @@ export async function deleteClosePhotoReactionViaServer(
   );
 }
 
+export async function importPhotoToMyTimeline(
+  photoId: string,
+  input: ImportPhotoToMyTimelineRequest,
+  options: Pick<
+    ServerPersonalPhotoStorageOptions,
+    "baseUrl" | "fetchImpl" | "writeToken"
+  > = {}
+): Promise<ImportPhotoToMyTimelineResponse> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const writeToken = options.writeToken ?? getActiveBrowserWriteAccessToken();
+  return await fetchJson<ImportPhotoToMyTimelineResponse>(
+    fetchImpl,
+    joinApiUrl(
+      options.baseUrl,
+      "",
+      `/api/personal/photos/${encodeURIComponent(photoId)}/import`
+    ),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getWriteAuthHeaders(writeToken),
+      },
+      body: JSON.stringify(input),
+    }
+  );
+}
+
 function getPhotosListUrl(
   baseUrl: string | undefined,
   apiBasePath: string
@@ -584,6 +624,7 @@ function toServerPhotoFields(photo: PhotoRecord): ServerPhotoFields {
     seriesId: photo.seriesId,
     seriesReminder: photo.seriesReminder,
     social: normalizePhotoSocialSettings(photo.social),
+    source: photo.source,
   };
 }
 
@@ -652,6 +693,7 @@ async function serverPhotoDtoToPhotoRecord(
     seriesId: dto.seriesId,
     seriesReminder: dto.seriesReminder,
     social: normalizePhotoSocialSettings(dto.social),
+    source: dto.source,
   };
 }
 
@@ -671,6 +713,7 @@ function serverPhotoDtoToPhotoMetadata(dto: ServerPersonalPhotoDto): PhotoRecord
     seriesReminder: dto.seriesReminder,
     social: normalizePhotoSocialSettings(dto.social),
     hasPreview: !!dto.previewUrl,
+    source: dto.source,
   };
 }
 

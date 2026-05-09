@@ -2,6 +2,7 @@ import type { HistoricalEvent } from "./history/types";
 import { assignHistoricalLanes } from "./history/laneAssignment";
 import {
   normalizePhotoSocialSettings,
+  type PhotoImportSourceMetadata,
   type PhotoSocialSettings,
 } from "./photoSocial";
 
@@ -39,6 +40,8 @@ export type PhotoRecord = {
   seriesReminder?: boolean;
   /** Per-photo social interaction settings. Legacy records default to reactions off. */
   social?: PhotoSocialSettings;
+  /** Metadata for photos imported from another visible profile. */
+  source?: PhotoImportSourceMetadata;
 };
 
 const DEFAULT_PROFILE_ID = "1";

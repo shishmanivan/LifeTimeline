@@ -16,6 +16,7 @@ import type {
 import {
   authenticateWithGoogleViaServer,
   getPhotoViewStatsViaServer,
+  importPhotoToMyTimeline,
   loadProfileForCurrentRoute,
   recordPhotoViewViaServer,
   type ServerProfileDto,
@@ -197,6 +198,7 @@ function toPersonalPhoto(
     seriesId: record.seriesId,
     seriesReminder: record.seriesReminder,
     social: normalizePhotoSocialSettings(record.social),
+    source: record.source,
   };
 }
 
@@ -945,6 +947,20 @@ function App() {
       console.error("[photos] reload after import", err)
     );
   }, [refreshSeriesUiState]);
+
+  const handleImportPhotoToMyTimeline = useCallback(
+    async (
+      photoId: string,
+      options: { includeText: boolean; includeAllPhotosOfDay: boolean }
+    ): Promise<number> => {
+      const response = await importPhotoToMyTimeline(photoId, options);
+      if (isAuthenticatedOwnerViewingCurrentProfile) {
+        await refreshSeriesUiState();
+      }
+      return response.created.length + response.skipped.length;
+    },
+    [isAuthenticatedOwnerViewingCurrentProfile, refreshSeriesUiState]
+  );
 
   useEffect(() => {
     if (!hasGoogleAuthConfig()) return;
@@ -3307,6 +3323,7 @@ function App() {
                     seriesId: p.seriesId,
                     seriesReminder: p.seriesReminder,
                     social: p.social,
+                    source: p.source,
                   }
                 : null;
             })()
@@ -3318,6 +3335,7 @@ function App() {
             note: p.note,
             seriesReminder: p.seriesReminder,
             social: p.social,
+            source: p.source,
           }))}
           imageUrl={overlayUrl}
           isOpen={true}
@@ -3335,6 +3353,7 @@ function App() {
           onReplaceImage={handleReplaceImage}
           onAddPhotoToDay={handleAddPhotoToDay}
           onNavigate={setOverlayPhotoId}
+          onImportPhotoToMyTimeline={handleImportPhotoToMyTimeline}
           photosInSeries={photosInSeries.map((p) => ({
             id: p.id,
             image: p.image,

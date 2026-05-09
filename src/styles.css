@@ -1677,6 +1677,122 @@ body {
   animation: close-to-me-burst-shell 1200ms ease-out both;
 }
 
+.personal-modal-import-on-photo {
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.personal-modal-image-wrap:has(.personal-modal-nav) .personal-modal-import-on-photo {
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 50px);
+}
+
+.personal-modal-import-trigger {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.34);
+  color: rgba(255, 255, 255, 0.88);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+.personal-modal-import-trigger:hover {
+  background: rgba(0, 0, 0, 0.44);
+}
+
+.personal-modal-import-trigger:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.personal-modal-import-popover {
+  width: min(250px, calc(100vw - 32px));
+  padding: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #222;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(10px);
+}
+
+.personal-modal-import-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  font-size: 13px;
+  line-height: 1.3;
+  color: #222;
+  cursor: pointer;
+}
+
+.personal-modal-import-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: #111;
+}
+
+.personal-modal-import-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.personal-modal-import-action {
+  padding: 6px 10px;
+  border: 1px solid #d6d6d6;
+  border-radius: 7px;
+  background: #fff;
+  color: #444;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.personal-modal-import-action-primary {
+  border-color: #111;
+  background: #111;
+  color: #fff;
+}
+
+.personal-modal-import-action:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.personal-modal-import-message {
+  max-width: 240px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.46);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  line-height: 1.25;
+  text-align: right;
+  backdrop-filter: blur(8px);
+}
+
+.personal-modal-text-attribution {
+  margin-top: -4px;
+  color: #777;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .close-to-me-icon {
   display: block;
   flex: 0 0 auto;
@@ -2562,6 +2678,17 @@ body {
 
   .personal-modal-card-photo .personal-modal-nav {
     bottom: calc(env(safe-area-inset-bottom) + 14px);
+  }
+
+  .personal-modal-card-photo .personal-modal-import-on-photo,
+  .personal-modal-card-photo .personal-modal-reactions-on-photo,
+  .personal-modal-card-photo .personal-modal-image-wrap:has(.personal-modal-nav) .personal-modal-import-on-photo,
+  .personal-modal-card-photo .personal-modal-image-wrap:has(.personal-modal-nav) .personal-modal-reactions-on-photo {
+    bottom: calc(env(safe-area-inset-bottom) + 62px);
+  }
+
+  .personal-modal-card-photo .personal-modal-import-popover {
+    max-width: calc(100vw - 24px);
   }
 
   .personal-modal-card-photo .personal-modal-series {

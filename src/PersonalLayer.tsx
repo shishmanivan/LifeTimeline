@@ -1,4 +1,4 @@
-import type { PhotoSocialSettings } from "./photoSocial";
+import type { PhotoImportSourceMetadata, PhotoSocialSettings } from "./photoSocial";
 
 export type Offsets = { offsetXDays: number; offsetY: number };
 
@@ -16,6 +16,7 @@ export type PersonalPhoto = {
   seriesId?: string;
   seriesReminder?: boolean;
   social?: PhotoSocialSettings;
+  source?: PhotoImportSourceMetadata;
 };
 
 export type PositionedPhoto = PersonalPhoto & {

@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef, useState } from "react";
 import {
   CLOSE_REACTION,
   normalizePhotoSocialSettings,
+  type PhotoImportSourceMetadata,
   type PhotoSocialSettings,
 } from "./photoSocial";
 import { CloseToMeReactionIcon } from "./CloseToMeReactionIcon";
@@ -20,6 +21,7 @@ export type PersonalPhotoForModal = {
   seriesId?: string;
   seriesReminder?: boolean;
   social?: PhotoSocialSettings;
+  source?: PhotoImportSourceMetadata;
 };
 
 export type PhotoInSeriesForModal = {
@@ -55,6 +57,10 @@ type PersonalPhotoModalProps = {
   onReplaceImage: (id: string, file: File) => void;
   onAddPhotoToDay: (file: File) => void;
   onNavigate: (photoId: string) => void;
+  onImportPhotoToMyTimeline: (
+    photoId: string,
+    options: { includeText: boolean; includeAllPhotosOfDay: boolean }
+  ) => Promise<number>;
   onStartLinking: () => void;
   onConfirmLink: (targetPhotoId: string, seriesId: string | null) => void;
   onUnlinkFromSeries: (id: string) => void;
@@ -77,6 +83,11 @@ type PersonalPhotoModalProps = {
 };
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
+
+function shouldUseEnglishLabels(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return navigator.language.toLowerCase().startsWith("en");
+}
 
 function formatSeriesDate(dateStr: string): string {
   const d = new Date(dateStr);
@@ -103,6 +114,7 @@ export function PersonalPhotoModal({
   onReplaceImage,
   onAddPhotoToDay,
   onNavigate,
+  onImportPhotoToMyTimeline,
   onStartLinking,
   onConfirmLink,
   onUnlinkFromSeries,
@@ -139,11 +151,17 @@ export function PersonalPhotoModal({
     useState<GetPhotoReactionsResponse | null>(null);
   const [closeReactionLoading, setCloseReactionLoading] = useState(false);
   const [closeReactionMessage, setCloseReactionMessage] = useState("");
+  const [importMenuOpen, setImportMenuOpen] = useState(false);
+  const [includeImportText, setIncludeImportText] = useState(false);
+  const [includeAllPhotosOfDay, setIncludeAllPhotosOfDay] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
   const closeReactionAnimationTimerRef = useRef<number | null>(null);
   const closeReactionAnimationFrameRef = useRef<number | null>(null);
   const [renamingSeries, setRenamingSeries] = useState(false);
   const [draftSeriesTitle, setDraftSeriesTitle] = useState("");
   const [seriesGalleryOpen, setSeriesGalleryOpen] = useState(false);
+  const useEnglishLabels = shouldUseEnglishLabels();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addPhotoInputRef = useRef<HTMLInputElement>(null);
   const seriesTitleInputRef = useRef<HTMLInputElement>(null);
@@ -153,6 +171,7 @@ export function PersonalPhotoModal({
     ? photosInSeries.findIndex((p) => p.id === photo.id)
     : -1;
   const canSetSeriesReminder = !!photo?.seriesId && currentSeriesIndex > 0;
+  const canImportAllPhotosOfDay = photosInDay.length > 1;
   const savedSeriesReminder =
     canSetSeriesReminder && photo?.seriesReminder === true;
 
@@ -183,6 +202,11 @@ export function PersonalPhotoModal({
       setCloseReactionAnimationActive(false);
       setCloseReactionState(null);
       setCloseReactionMessage("");
+      setImportMenuOpen(false);
+      setIncludeImportText(false);
+      setIncludeAllPhotosOfDay(false);
+      setImportLoading(false);
+      setImportMessage("");
       setRenamingSeries(false);
       setSeriesGalleryOpen(false);
     }
@@ -360,6 +384,56 @@ export function PersonalPhotoModal({
     playCloseReactionAnimation,
   ]);
 
+  const handleImportButtonClick = useCallback(() => {
+    if (!photo) return;
+    if (!isAuthenticated) {
+      setImportMessage(
+        useEnglishLabels
+          ? "Sign in to add this photo to your timeline"
+          : "Войдите, чтобы добавить фото в свою хронику"
+      );
+      setImportMenuOpen(false);
+      return;
+    }
+    setImportMessage("");
+    setImportMenuOpen((current) => !current);
+  }, [photo, isAuthenticated, useEnglishLabels]);
+
+  const handleConfirmImport = useCallback(async () => {
+    if (!photo || importLoading) return;
+    setImportLoading(true);
+    setImportMessage("");
+    try {
+      const affectedCount = await onImportPhotoToMyTimeline(photo.id, {
+        includeText: includeImportText,
+        includeAllPhotosOfDay: canImportAllPhotosOfDay && includeAllPhotosOfDay,
+      });
+      setImportMenuOpen(false);
+      setImportMessage(
+        affectedCount > 1
+          ? useEnglishLabels
+            ? "Photos added to your timeline"
+            : "Фото добавлены в вашу хронику"
+          : useEnglishLabels
+            ? "Photo added to your timeline"
+            : "Фото добавлено в вашу хронику"
+      );
+    } catch (err) {
+      console.error("[import-photo] import failed", err);
+      setImportMessage("Не удалось добавить фото. Попробуйте ещё раз.");
+    } finally {
+      setImportLoading(false);
+    }
+  }, [
+    photo,
+    importLoading,
+    onImportPhotoToMyTimeline,
+    includeImportText,
+    includeAllPhotosOfDay,
+    canImportAllPhotosOfDay,
+    useEnglishLabels,
+  ]);
+
   const stopReactionEventPropagation = useCallback(
     (event: React.SyntheticEvent) => {
       event.stopPropagation();
@@ -511,6 +585,12 @@ export function PersonalPhotoModal({
   const closeReactionCount = closeReactionState?.counts.close ?? 0;
   const closeReactionIsActive =
     closeReactionState?.viewerReaction === CLOSE_REACTION;
+  const copiedTextSource =
+    photo?.source?.kind === "imported-photo" &&
+    photo.source.copiedText &&
+    photo.source.sourceAuthorName
+      ? photo.source.sourceAuthorName
+      : null;
 
   useEffect(() => {
     if (isLinkTarget) setLinkStep("confirm");
@@ -821,6 +901,80 @@ export function PersonalPhotoModal({
                 ) : null}
               </div>
             )}
+            {!isEditMode && (
+              <div
+                className="personal-modal-import personal-modal-import-on-photo"
+                onClick={stopReactionEventPropagation}
+                onPointerDown={stopReactionEventPropagation}
+                onTouchStart={stopReactionEventPropagation}
+              >
+                {importMenuOpen && (
+                  <div className="personal-modal-import-popover" role="menu">
+                    <label className="personal-modal-import-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={includeImportText}
+                        onChange={(event) =>
+                          setIncludeImportText(event.target.checked)
+                        }
+                      />
+                      <span>{useEnglishLabels ? "Include text" : "Забрать с текстом"}</span>
+                    </label>
+                    {canImportAllPhotosOfDay && (
+                      <label className="personal-modal-import-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={includeAllPhotosOfDay}
+                          onChange={(event) =>
+                            setIncludeAllPhotosOfDay(event.target.checked)
+                          }
+                        />
+                        <span>
+                          {useEnglishLabels
+                            ? "Include all photos from this day"
+                            : "Забрать все фото этого дня"}
+                        </span>
+                      </label>
+                    )}
+                    <div className="personal-modal-import-actions">
+                      <button
+                        type="button"
+                        className="personal-modal-import-action"
+                        onClick={() => setImportMenuOpen(false)}
+                        disabled={importLoading}
+                      >
+                        {useEnglishLabels ? "Cancel" : "Отмена"}
+                      </button>
+                      <button
+                        type="button"
+                        className="personal-modal-import-action personal-modal-import-action-primary"
+                        onClick={() => void handleConfirmImport()}
+                        disabled={importLoading}
+                      >
+                        {useEnglishLabels ? "Add" : "Забрать"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="personal-modal-import-trigger"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleImportButtonClick();
+                  }}
+                  disabled={importLoading}
+                  aria-expanded={importMenuOpen}
+                >
+                  {useEnglishLabels ? "Add to my timeline" : "Забрать фото к себе"}
+                </button>
+                {importMessage ? (
+                  <div className="personal-modal-import-message" role="status">
+                    {importMessage}
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <div
@@ -1082,6 +1236,13 @@ export function PersonalPhotoModal({
                 <div className="personal-modal-note-readonly">
                   {photo.note || "—"}
                 </div>
+                {copiedTextSource ? (
+                  <div className="personal-modal-text-attribution">
+                    {useEnglishLabels
+                      ? `Text by ${copiedTextSource}`
+                      : `Текст автора: ${copiedTextSource}`}
+                  </div>
+                ) : null}
                 <div className="personal-modal-footer">
                   {disableNonMetadataActions && allowMetadataEdit && (
                     <p className="personal-readonly-note personal-readonly-note-compact">

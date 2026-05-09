@@ -12,6 +12,16 @@ export const DEFAULT_PHOTO_SOCIAL_SETTINGS: PhotoSocialSettings = {
   allowedReactions: [],
 };
 
+export type PhotoImportSourceMetadata = {
+  kind: "imported-photo";
+  sourcePhotoId: string;
+  sourceProfileId: string;
+  sourceProfileSlug: string;
+  sourceAuthorName: string;
+  copiedAt: string;
+  copiedText: boolean;
+};
+
 const ALLOWED_PHOTO_REACTIONS = new Set<PhotoReactionType>([CLOSE_REACTION]);
 
 export function isPhotoReactionType(value: unknown): value is PhotoReactionType {
