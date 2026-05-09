@@ -77,6 +77,7 @@ type PersonalPhotoModalProps = {
   allowDeleteAllPhotosInDay?: boolean;
   allowSeriesLinking?: boolean;
   allowSeriesUnlinking?: boolean;
+  allowImportToMyTimeline?: boolean;
   isAuthenticated?: boolean;
   adminPhotoViewCount?: number | null;
   disabledActionsMessage?: string;
@@ -131,6 +132,7 @@ export function PersonalPhotoModal({
   allowDeleteAllPhotosInDay = false,
   allowSeriesLinking = false,
   allowSeriesUnlinking = false,
+  allowImportToMyTimeline = true,
   isAuthenticated = false,
   adminPhotoViewCount = null,
   disabledActionsMessage = "Server mode: image/add/delete actions are still disabled for now",
@@ -211,6 +213,13 @@ export function PersonalPhotoModal({
       setSeriesGalleryOpen(false);
     }
   }, [isOpen, photo?.id, savedSeriesReminder]);
+
+  useEffect(() => {
+    if (!allowImportToMyTimeline) {
+      setImportMenuOpen(false);
+      setImportMessage("");
+    }
+  }, [allowImportToMyTimeline]);
 
   useEffect(() => {
     return () => {
@@ -901,7 +910,7 @@ export function PersonalPhotoModal({
                 ) : null}
               </div>
             )}
-            {!isEditMode && (
+            {!isEditMode && allowImportToMyTimeline && (
               <div
                 className="personal-modal-import personal-modal-import-on-photo"
                 onClick={stopReactionEventPropagation}

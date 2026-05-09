@@ -1614,10 +1614,6 @@ body {
   pointer-events: auto;
 }
 
-.personal-modal-image-wrap:has(.personal-modal-nav) .personal-modal-reactions-on-photo {
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 50px);
-}
-
 .personal-modal-reaction-placeholder {
   display: inline-flex;
   align-items: center;
@@ -1687,10 +1683,6 @@ body {
   align-items: flex-end;
   gap: 6px;
   pointer-events: auto;
-}
-
-.personal-modal-image-wrap:has(.personal-modal-nav) .personal-modal-import-on-photo {
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 50px);
 }
 
 .personal-modal-import-trigger {
@@ -2678,13 +2670,6 @@ body {
 
   .personal-modal-card-photo .personal-modal-nav {
     bottom: calc(env(safe-area-inset-bottom) + 14px);
-  }
-
-  .personal-modal-card-photo .personal-modal-import-on-photo,
-  .personal-modal-card-photo .personal-modal-reactions-on-photo,
-  .personal-modal-card-photo .personal-modal-image-wrap:has(.personal-modal-nav) .personal-modal-import-on-photo,
-  .personal-modal-card-photo .personal-modal-image-wrap:has(.personal-modal-nav) .personal-modal-reactions-on-photo {
-    bottom: calc(env(safe-area-inset-bottom) + 62px);
   }
 
   .personal-modal-card-photo .personal-modal-import-popover {

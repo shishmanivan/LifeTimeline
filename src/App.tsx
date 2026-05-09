@@ -3354,6 +3354,16 @@ function App() {
           onAddPhotoToDay={handleAddPhotoToDay}
           onNavigate={setOverlayPhotoId}
           onImportPhotoToMyTimeline={handleImportPhotoToMyTimeline}
+          allowImportToMyTimeline={
+            (() => {
+              const p = personalPhotos.find((x) => x.id === overlayPhotoId);
+              if (!authenticatedUser) return true;
+              return (
+                !isAuthenticatedOwnerViewingCurrentProfile &&
+                p?.profileId !== authenticatedUser.primaryProfileId
+              );
+            })()
+          }
           photosInSeries={photosInSeries.map((p) => ({
             id: p.id,
             image: p.image,

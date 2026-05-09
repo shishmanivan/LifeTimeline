@@ -1362,15 +1362,25 @@ async function handleRequest(
       return;
     }
 
+    const sourceProfileId = getProfileDatasetProfileId(sourceLookup.profile);
+    const targetProfileId = getProfileDatasetProfileId(targetProfile);
+    if (sourceProfileId === targetProfileId) {
+      sendJson(res, 409, {
+        error: "self-import-not-allowed",
+        message: "Cannot import a photo from your own timeline.",
+      });
+      return;
+    }
+
     const targetDataDir = readWriteDatasetDirForProfile(targetProfile);
     await ensurePreparedPersonalDataset(targetDataDir);
     const result = await importPreparedPhotos(targetDataDir, {
       sourceDataDir: sourceLookup.dataDir,
       sourcePhotoId,
-      sourceProfileId: getProfileDatasetProfileId(sourceLookup.profile),
+      sourceProfileId,
       sourceProfileSlug: sourceLookup.profile.slug,
       sourceAuthorName: await getSourceAuthorName(sourceLookup.profile),
-      targetProfileId: getProfileDatasetProfileId(targetProfile),
+      targetProfileId,
       includeText: importRequest.includeText,
       includeAllPhotosOfDay: importRequest.includeAllPhotosOfDay,
     });
