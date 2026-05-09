@@ -15,6 +15,8 @@ import type {
 } from "./personalPhotoStorage";
 import {
   authenticateWithGoogleViaServer,
+  collectImportedSourcePhotoIdsFromDtos,
+  fetchAuthenticatedUserPersonalPhotos,
   getPhotoViewStatsViaServer,
   importPhotoToMyTimeline,
   loadProfileForCurrentRoute,
@@ -607,6 +609,9 @@ function App() {
   );
   const [activeProfile, setActiveProfile] = useState<ServerProfileDto | null>(null);
   const [personalPhotos, setPersonalPhotos] = useState<PersonalPhoto[]>([]);
+  const [importedSourcePhotoIds, setImportedSourcePhotoIds] = useState(
+    () => new Set<string>()
+  );
   const [historicalEvents, setHistoricalEvents] = useState<HistoricalEvent[]>([]);
   const [layoutInfo, setLayoutInfo] = useState<{
     width: number;
@@ -827,6 +832,24 @@ function App() {
     activeProfile !== null &&
     activeProfile.slug !== ownProfileSlug;
 
+  const personalModalAllowImportToMyTimeline = useMemo(() => {
+    if (!overlayPhotoId) return true;
+    const openedPhoto = personalPhotos.find((x) => x.id === overlayPhotoId);
+    if (!authenticatedUser) return true;
+    const alreadyImportedByMe = importedSourcePhotoIds.has(overlayPhotoId);
+    return (
+      !isAuthenticatedOwnerViewingCurrentProfile &&
+      openedPhoto?.profileId !== authenticatedUser.primaryProfileId &&
+      !alreadyImportedByMe
+    );
+  }, [
+    overlayPhotoId,
+    personalPhotos,
+    authenticatedUser,
+    isAuthenticatedOwnerViewingCurrentProfile,
+    importedSourcePhotoIds,
+  ]);
+
   const handleReturnToOwnProfile = useCallback(() => {
     if (!ownProfileSlug || typeof window === "undefined") return;
     setAccountMenuOpen(false);
@@ -954,6 +977,17 @@ function App() {
       options: { includeText: boolean; includeAllPhotosOfDay: boolean }
     ): Promise<number> => {
       const response = await importPhotoToMyTimeline(photoId, options);
+      setImportedSourcePhotoIds((prev) => {
+        const next = new Set(prev);
+        for (const id of collectImportedSourcePhotoIdsFromDtos([
+          ...response.created,
+          ...response.skipped,
+        ])) {
+          next.add(id);
+        }
+        next.add(photoId);
+        return next;
+      });
       if (isAuthenticatedOwnerViewingCurrentProfile) {
         await refreshSeriesUiState();
       }
@@ -1134,6 +1168,33 @@ function App() {
       cancelled = true;
     };
   }, [activeBrowserUser, personalPhotoStorageIsServerMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!personalPhotoStorageIsServerMode || !authenticatedUser) {
+      setImportedSourcePhotoIds(new Set());
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      try {
+        const { photos } = await fetchAuthenticatedUserPersonalPhotos();
+        if (cancelled) return;
+        setImportedSourcePhotoIds(collectImportedSourcePhotoIdsFromDtos(photos));
+      } catch (err) {
+        if (!cancelled) {
+          console.error("[import-tracking] load /api/personal/photos failed", err);
+          setImportedSourcePhotoIds(new Set());
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticatedUser, activeBrowserUser, personalPhotoStorageIsServerMode]);
 
   useEffect(() => {
     if (isLandingRoute) return;
@@ -3354,16 +3415,7 @@ function App() {
           onAddPhotoToDay={handleAddPhotoToDay}
           onNavigate={setOverlayPhotoId}
           onImportPhotoToMyTimeline={handleImportPhotoToMyTimeline}
-          allowImportToMyTimeline={
-            (() => {
-              const p = personalPhotos.find((x) => x.id === overlayPhotoId);
-              if (!authenticatedUser) return true;
-              return (
-                !isAuthenticatedOwnerViewingCurrentProfile &&
-                p?.profileId !== authenticatedUser.primaryProfileId
-              );
-            })()
-          }
+          allowImportToMyTimeline={personalModalAllowImportToMyTimeline}
           photosInSeries={photosInSeries.map((p) => ({
             id: p.id,
             image: p.image,

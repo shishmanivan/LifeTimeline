@@ -1,4 +1,4 @@
-export type PhotoReactionType = "close";
+export type PhotoReactionType = "close" | "partOfThis";
 
 export type PhotoSocialSettings = {
   reactionsEnabled: boolean;
@@ -6,6 +6,7 @@ export type PhotoSocialSettings = {
 };
 
 export const CLOSE_REACTION: PhotoReactionType = "close";
+export const PART_OF_THIS_REACTION: PhotoReactionType = "partOfThis";
 
 export const DEFAULT_PHOTO_SOCIAL_SETTINGS: PhotoSocialSettings = {
   reactionsEnabled: false,
@@ -22,7 +23,10 @@ export type PhotoImportSourceMetadata = {
   copiedText: boolean;
 };
 
-const ALLOWED_PHOTO_REACTIONS = new Set<PhotoReactionType>([CLOSE_REACTION]);
+const ALLOWED_PHOTO_REACTIONS = new Set<PhotoReactionType>([
+  CLOSE_REACTION,
+  PART_OF_THIS_REACTION,
+]);
 
 export function isPhotoReactionType(value: unknown): value is PhotoReactionType {
   return typeof value === "string" && ALLOWED_PHOTO_REACTIONS.has(value as PhotoReactionType);

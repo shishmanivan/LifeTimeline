@@ -1,0 +1,75 @@
+<svg class="part-of-this-icon" width="28" height="28" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <style>
+    .part-of-this-icon__center {
+      fill: #D8CEBA;
+      stroke: #4B4744;
+      stroke-width: 1.8;
+    }
+
+    .part-of-this-icon__dot {
+      fill: #FFFFFF;
+      stroke: #4B4744;
+      stroke-width: 1.8;
+    }
+
+    .part-of-this-icon__satellite {
+      transition: transform 240ms ease-out, opacity 240ms ease-out;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    /* Спокойное состояние: точки чуть дальше */
+    .part-of-this-icon__satellite--top {
+      transform: translateY(-4px);
+    }
+
+    .part-of-this-icon__satellite--upper-left {
+      transform: translate(-4px, -2px);
+    }
+
+    .part-of-this-icon__satellite--upper-right {
+      transform: translate(4px, -2px);
+    }
+
+    .part-of-this-icon__satellite--lower-left {
+      transform: translate(-3px, 4px);
+    }
+
+    .part-of-this-icon__satellite--lower-right {
+      transform: translate(3px, 4px);
+    }
+
+    /* Активное состояние: точки подходят ближе к центру */
+    .part-of-this-icon.part-of-this-icon--active .part-of-this-icon__satellite {
+      transform: translate(0, 0);
+    }
+  </style>
+
+  <!-- Центральная точка -->
+  <circle class="part-of-this-icon__center" cx="32" cy="32" r="4.6"></circle>
+
+  <!-- Верхняя -->
+  <g class="part-of-this-icon__satellite part-of-this-icon__satellite--top">
+    <circle class="part-of-this-icon__dot" cx="32" cy="16" r="3.2"></circle>
+  </g>
+
+  <!-- Верхняя левая -->
+  <g class="part-of-this-icon__satellite part-of-this-icon__satellite--upper-left">
+    <circle class="part-of-this-icon__dot" cx="22" cy="24" r="3.2"></circle>
+  </g>
+
+  <!-- Верхняя правая -->
+  <g class="part-of-this-icon__satellite part-of-this-icon__satellite--upper-right">
+    <circle class="part-of-this-icon__dot" cx="42" cy="24" r="3.2"></circle>
+  </g>
+
+  <!-- Нижняя левая -->
+  <g class="part-of-this-icon__satellite part-of-this-icon__satellite--lower-left">
+    <circle class="part-of-this-icon__dot" cx="25" cy="41" r="3.2"></circle>
+  </g>
+
+  <!-- Нижняя правая -->
+  <g class="part-of-this-icon__satellite part-of-this-icon__satellite--lower-right">
+    <circle class="part-of-this-icon__dot" cx="39" cy="41" r="3.2"></circle>
+  </g>
+</svg>

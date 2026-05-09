@@ -58,8 +58,8 @@ import {
   type PhotoViewIdentity,
 } from "./photoViewStore";
 import {
-  deleteClosePhotoReaction,
-  putClosePhotoReaction,
+  deletePhotoReaction,
+  putPhotoReaction,
   readPhotoReactionSummary,
 } from "./socialReactionStore";
 import type { ProfileModel } from "../src/profileModel";
@@ -74,9 +74,9 @@ import type {
   VerifyRecoveryCodeInput,
 } from "../src/userModel";
 import {
-  CLOSE_REACTION,
   isPhotoReactionType,
   normalizePhotoSocialSettings,
+  type PhotoReactionType,
   type PhotoSocialSettings,
 } from "../src/photoSocial";
 import { getAuthenticatedUserFromRequest } from "./auth/getAuthenticatedUser";
@@ -91,10 +91,12 @@ type PersonalReadonlyServerConfig = {
 type SocialPhotoReactionResponse = {
   counts: {
     close: number;
+    partOfThis: number;
   };
-  viewerReaction: "close" | null;
+  viewerReaction: PhotoReactionType | null;
+  viewerReactions: PhotoReactionType[];
   reactionsEnabled: boolean;
-  allowedReactions: "close"[];
+  allowedReactions: PhotoReactionType[];
 };
 
 type SocialPhotoLookupResult = {
@@ -231,17 +233,16 @@ async function findPreparedPhotoForSocial(
 
 function getAllowedSocialReactions(
   photo: Pick<PreparedPhotoSocialRecord, "social">
-): "close"[] {
+): PhotoReactionType[] {
   const social = normalizePhotoSocialSettings(photo.social);
-  return social.reactionsEnabled && social.allowedReactions.includes(CLOSE_REACTION)
-    ? [CLOSE_REACTION]
-    : [];
+  return social.reactionsEnabled ? social.allowedReactions : [];
 }
 
-function areCloseReactionsAllowed(
-  photo: Pick<PreparedPhotoSocialRecord, "social">
+function isSocialReactionAllowed(
+  photo: Pick<PreparedPhotoSocialRecord, "social">,
+  reactionType: PhotoReactionType
 ): boolean {
-  return getAllowedSocialReactions(photo).includes(CLOSE_REACTION);
+  return getAllowedSocialReactions(photo).includes(reactionType);
 }
 
 async function buildSocialPhotoReactionResponse(
@@ -249,11 +250,12 @@ async function buildSocialPhotoReactionResponse(
   authUser: UserModel | null
 ): Promise<SocialPhotoReactionResponse> {
   const allowedReactions = getAllowedSocialReactions(photo);
-  const reactionsEnabled = allowedReactions.includes(CLOSE_REACTION);
+  const reactionsEnabled = allowedReactions.length > 0;
   if (!reactionsEnabled) {
     return {
-      counts: { close: 0 },
+      counts: { close: 0, partOfThis: 0 },
       viewerReaction: null,
+      viewerReactions: [],
       reactionsEnabled: false,
       allowedReactions: [],
     };
@@ -263,6 +265,7 @@ async function buildSocialPhotoReactionResponse(
   return {
     counts: summary.counts,
     viewerReaction: summary.viewerReaction,
+    viewerReactions: summary.viewerReactions,
     reactionsEnabled: true,
     allowedReactions,
   };
@@ -1217,11 +1220,12 @@ async function handleRequest(
     return;
   }
 
-  const closeReactionMatch = pathname.match(
-    /^\/api\/social\/photos\/([^/]+)\/reactions\/close$/
+  const reactionMutationMatch = pathname.match(
+    /^\/api\/social\/photos\/([^/]+)\/reactions\/([^/]+)$/
   );
-  if (closeReactionMatch) {
-    const photoId = decodeURIComponent(closeReactionMatch[1]).trim();
+  if (reactionMutationMatch) {
+    const photoId = decodeURIComponent(reactionMutationMatch[1]).trim();
+    const reactionTypeRaw = decodeURIComponent(reactionMutationMatch[2]).trim();
     if (!photoId) {
       sendJson(res, 400, {
         error: "invalid-input",
@@ -1231,6 +1235,13 @@ async function handleRequest(
     }
     if (req.method !== "PUT" && req.method !== "DELETE") {
       sendText(res, 405, "Method not allowed.");
+      return;
+    }
+    if (!isPhotoReactionType(reactionTypeRaw)) {
+      sendJson(res, 400, {
+        error: "invalid-input",
+        message: "Unsupported reaction type.",
+      });
       return;
     }
     if (!authUser) {
@@ -1243,7 +1254,7 @@ async function handleRequest(
       sendText(res, 404, "Photo not found.");
       return;
     }
-    if (!areCloseReactionsAllowed(lookup.photo)) {
+    if (!isSocialReactionAllowed(lookup.photo, reactionTypeRaw)) {
       sendJson(res, 409, {
         error: "reactions-disabled",
         message: "Reactions are not enabled for this photo.",
@@ -1252,15 +1263,17 @@ async function handleRequest(
     }
 
     if (req.method === "PUT") {
-      await putClosePhotoReaction({
+      await putPhotoReaction({
         profileId: lookup.photo.profileId,
         photoId: lookup.photo.id,
         userId: authUser.id,
+        type: reactionTypeRaw,
       });
     } else {
-      await deleteClosePhotoReaction({
+      await deletePhotoReaction({
         photoId: lookup.photo.id,
         userId: authUser.id,
+        type: reactionTypeRaw,
       });
     }
 

@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { CLOSE_REACTION, type PhotoReactionType } from "../src/photoSocial";
+import {
+  CLOSE_REACTION,
+  PART_OF_THIS_REACTION,
+  isPhotoReactionType,
+  type PhotoReactionType,
+} from "../src/photoSocial";
 
 export type PhotoReaction = {
   id: string;
@@ -17,6 +22,7 @@ export type PhotoReactionCounts = Record<PhotoReactionType, number>;
 export type PhotoReactionSummary = {
   counts: PhotoReactionCounts;
   viewerReaction: PhotoReactionType | null;
+  viewerReactions: PhotoReactionType[];
 };
 
 type SocialReactionStoreData = {
@@ -57,7 +63,7 @@ function normalizeReaction(value: unknown): PhotoReaction | null {
     typeof value.profileId !== "string" ||
     typeof value.photoId !== "string" ||
     typeof value.userId !== "string" ||
-    value.type !== CLOSE_REACTION ||
+    !isPhotoReactionType(value.type) ||
     typeof value.createdAt !== "string"
   ) {
     return null;
@@ -68,7 +74,7 @@ function normalizeReaction(value: unknown): PhotoReaction | null {
     profileId: value.profileId,
     photoId: value.photoId,
     userId: value.userId,
-    type: CLOSE_REACTION,
+    type: value.type,
     createdAt: value.createdAt,
   };
 }
@@ -122,24 +128,32 @@ function buildSummary(
   photoId: string,
   viewerUserId: string | null
 ): PhotoReactionSummary {
-  const closeUserIds = new Set<string>();
-  let viewerReaction: PhotoReactionType | null = null;
+  const reactionUserIds: Record<PhotoReactionType, Set<string>> = {
+    close: new Set<string>(),
+    partOfThis: new Set<string>(),
+  };
+  const viewerReactions = new Set<PhotoReactionType>();
 
   for (const reaction of store.reactions) {
-    if (reaction.photoId !== photoId || reaction.type !== CLOSE_REACTION) {
+    if (reaction.photoId !== photoId) {
       continue;
     }
-    closeUserIds.add(reaction.userId);
+    reactionUserIds[reaction.type].add(reaction.userId);
     if (viewerUserId && reaction.userId === viewerUserId) {
-      viewerReaction = CLOSE_REACTION;
+      viewerReactions.add(reaction.type);
     }
   }
+  const orderedViewerReactions = [CLOSE_REACTION, PART_OF_THIS_REACTION].filter(
+    (reactionType) => viewerReactions.has(reactionType)
+  );
 
   return {
     counts: {
-      close: closeUserIds.size,
+      close: reactionUserIds.close.size,
+      partOfThis: reactionUserIds.partOfThis.size,
     },
-    viewerReaction,
+    viewerReaction: orderedViewerReactions[0] ?? null,
+    viewerReactions: orderedViewerReactions,
   };
 }
 
@@ -157,10 +171,11 @@ export async function readPhotoReactionSummary(
   return buildSummary(store, photoId, viewerUserId);
 }
 
-export async function putClosePhotoReaction(input: {
+export async function putPhotoReaction(input: {
   profileId: string;
   photoId: string;
   userId: string;
+  type: PhotoReactionType;
   createdAt?: string;
 }): Promise<PhotoReactionSummary> {
   return await enqueueStoreUpdate(async () => {
@@ -169,7 +184,7 @@ export async function putClosePhotoReaction(input: {
       (reaction) =>
         reaction.photoId === input.photoId &&
         reaction.userId === input.userId &&
-        reaction.type === CLOSE_REACTION
+        reaction.type === input.type
     );
 
     if (!existing) {
@@ -178,7 +193,7 @@ export async function putClosePhotoReaction(input: {
         profileId: input.profileId,
         photoId: input.photoId,
         userId: input.userId,
-        type: CLOSE_REACTION,
+        type: input.type,
         createdAt: input.createdAt ?? new Date().toISOString(),
       });
       await writeSocialReactionStore(store);
@@ -188,9 +203,10 @@ export async function putClosePhotoReaction(input: {
   });
 }
 
-export async function deleteClosePhotoReaction(input: {
+export async function deletePhotoReaction(input: {
   photoId: string;
   userId: string;
+  type: PhotoReactionType;
 }): Promise<PhotoReactionSummary> {
   return await enqueueStoreUpdate(async () => {
     const store = await readSocialReactionStore();
@@ -199,7 +215,7 @@ export async function deleteClosePhotoReaction(input: {
         !(
           reaction.photoId === input.photoId &&
           reaction.userId === input.userId &&
-          reaction.type === CLOSE_REACTION
+          reaction.type === input.type
         )
     );
 
@@ -209,5 +225,27 @@ export async function deleteClosePhotoReaction(input: {
     }
 
     return buildSummary(store, input.photoId, input.userId);
+  });
+}
+
+export async function putClosePhotoReaction(input: {
+  profileId: string;
+  photoId: string;
+  userId: string;
+  createdAt?: string;
+}): Promise<PhotoReactionSummary> {
+  return await putPhotoReaction({
+    ...input,
+    type: CLOSE_REACTION,
+  });
+}
+
+export async function deleteClosePhotoReaction(input: {
+  photoId: string;
+  userId: string;
+}): Promise<PhotoReactionSummary> {
+  return await deletePhotoReaction({
+    ...input,
+    type: CLOSE_REACTION,
   });
 }

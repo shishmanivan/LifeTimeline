@@ -11,6 +11,7 @@ import type {
 import type { ProfileModel } from "./profileModel";
 import {
   CLOSE_REACTION,
+  PART_OF_THIS_REACTION,
   normalizePhotoSocialSettings,
   type PhotoImportSourceMetadata,
   type PhotoReactionType,
@@ -134,6 +135,7 @@ export type PhotoReactionCounts = Record<PhotoReactionType, number>;
 export type GetPhotoReactionsResponse = {
   counts: PhotoReactionCounts;
   viewerReaction: PhotoReactionType | null;
+  viewerReactions: PhotoReactionType[];
   reactionsEnabled: boolean;
   allowedReactions: PhotoReactionType[];
 };
@@ -418,8 +420,9 @@ export async function getPhotoReactionsViaServer(
   );
 }
 
-export async function putClosePhotoReactionViaServer(
+export async function putPhotoReactionViaServer(
   photoId: string,
+  reactionType: PhotoReactionType,
   options: Pick<
     ServerPersonalPhotoStorageOptions,
     "baseUrl" | "fetchImpl" | "writeToken"
@@ -432,13 +435,47 @@ export async function putClosePhotoReactionViaServer(
     joinApiUrl(
       options.baseUrl,
       "",
-      `/api/social/photos/${encodeURIComponent(photoId)}/reactions/${CLOSE_REACTION}`
+      `/api/social/photos/${encodeURIComponent(photoId)}/reactions/${reactionType}`
     ),
     {
       method: "PUT",
       headers: getWriteAuthHeaders(writeToken),
     }
   );
+}
+
+export async function deletePhotoReactionViaServer(
+  photoId: string,
+  reactionType: PhotoReactionType,
+  options: Pick<
+    ServerPersonalPhotoStorageOptions,
+    "baseUrl" | "fetchImpl" | "writeToken"
+  > = {}
+): Promise<GetPhotoReactionsResponse> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const writeToken = options.writeToken ?? getActiveBrowserWriteAccessToken();
+  return await fetchJson<GetPhotoReactionsResponse>(
+    fetchImpl,
+    joinApiUrl(
+      options.baseUrl,
+      "",
+      `/api/social/photos/${encodeURIComponent(photoId)}/reactions/${reactionType}`
+    ),
+    {
+      method: "DELETE",
+      headers: getWriteAuthHeaders(writeToken),
+    }
+  );
+}
+
+export async function putClosePhotoReactionViaServer(
+  photoId: string,
+  options: Pick<
+    ServerPersonalPhotoStorageOptions,
+    "baseUrl" | "fetchImpl" | "writeToken"
+  > = {}
+): Promise<GetPhotoReactionsResponse> {
+  return await putPhotoReactionViaServer(photoId, CLOSE_REACTION, options);
 }
 
 export async function deleteClosePhotoReactionViaServer(
@@ -448,20 +485,27 @@ export async function deleteClosePhotoReactionViaServer(
     "baseUrl" | "fetchImpl" | "writeToken"
   > = {}
 ): Promise<GetPhotoReactionsResponse> {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const writeToken = options.writeToken ?? getActiveBrowserWriteAccessToken();
-  return await fetchJson<GetPhotoReactionsResponse>(
-    fetchImpl,
-    joinApiUrl(
-      options.baseUrl,
-      "",
-      `/api/social/photos/${encodeURIComponent(photoId)}/reactions/${CLOSE_REACTION}`
-    ),
-    {
-      method: "DELETE",
-      headers: getWriteAuthHeaders(writeToken),
-    }
-  );
+  return await deletePhotoReactionViaServer(photoId, CLOSE_REACTION, options);
+}
+
+export async function putPartOfThisPhotoReactionViaServer(
+  photoId: string,
+  options: Pick<
+    ServerPersonalPhotoStorageOptions,
+    "baseUrl" | "fetchImpl" | "writeToken"
+  > = {}
+): Promise<GetPhotoReactionsResponse> {
+  return await putPhotoReactionViaServer(photoId, PART_OF_THIS_REACTION, options);
+}
+
+export async function deletePartOfThisPhotoReactionViaServer(
+  photoId: string,
+  options: Pick<
+    ServerPersonalPhotoStorageOptions,
+    "baseUrl" | "fetchImpl" | "writeToken"
+  > = {}
+): Promise<GetPhotoReactionsResponse> {
+  return await deletePhotoReactionViaServer(photoId, PART_OF_THIS_REACTION, options);
 }
 
 export async function importPhotoToMyTimeline(
@@ -490,6 +534,45 @@ export async function importPhotoToMyTimeline(
       body: JSON.stringify(input),
     }
   );
+}
+
+/**
+ * Lists photos for the authenticated user's primary profile from `GET /api/personal/photos`,
+ * regardless of which public profile route is open in the browser.
+ */
+export async function fetchAuthenticatedUserPersonalPhotos(
+  options: Pick<
+    ServerPersonalPhotoStorageOptions,
+    "baseUrl" | "fetchImpl" | "writeToken"
+  > = {}
+): Promise<ListServerPersonalPhotosResponse> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const writeToken = options.writeToken ?? getActiveBrowserWriteAccessToken();
+  return await fetchJson<ListServerPersonalPhotosResponse>(
+    fetchImpl,
+    joinApiUrl(options.baseUrl, "", "/api/personal/photos"),
+    {
+      headers: getWriteAuthHeaders(writeToken),
+    }
+  );
+}
+
+export function collectImportedSourcePhotoIdsFromDtos(
+  photos: readonly ServerPersonalPhotoDto[]
+): Set<string> {
+  const ids = new Set<string>();
+  for (const photo of photos) {
+    const s = photo.source;
+    if (
+      s &&
+      s.kind === "imported-photo" &&
+      typeof s.sourcePhotoId === "string" &&
+      s.sourcePhotoId.length > 0
+    ) {
+      ids.add(s.sourcePhotoId);
+    }
+  }
+  return ids;
 }
 
 function getPhotosListUrl(

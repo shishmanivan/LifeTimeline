@@ -1,15 +1,18 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import {
   CLOSE_REACTION,
+  PART_OF_THIS_REACTION,
   normalizePhotoSocialSettings,
   type PhotoImportSourceMetadata,
+  type PhotoReactionType,
   type PhotoSocialSettings,
 } from "./photoSocial";
 import { CloseToMeReactionIcon } from "./CloseToMeReactionIcon";
+import { PartOfThisReactionIcon } from "./PartOfThisReactionIcon";
 import {
-  deleteClosePhotoReactionViaServer,
+  deletePhotoReactionViaServer,
   getPhotoReactionsViaServer,
-  putClosePhotoReactionViaServer,
+  putPhotoReactionViaServer,
   type GetPhotoReactionsResponse,
 } from "./serverPersonalPhotoStorage";
 
@@ -96,6 +99,13 @@ function formatSeriesDate(dateStr: string): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${day}.${m}.${y}`;
+}
+
+function hasViewerReaction(
+  state: GetPhotoReactionsResponse | null,
+  reactionType: PhotoReactionType
+): boolean {
+  return state?.viewerReactions?.includes(reactionType) ?? state?.viewerReaction === reactionType;
 }
 
 export function PersonalPhotoModal({
@@ -325,14 +335,27 @@ export function PersonalPhotoModal({
   const handleAllowReactionsChange = useCallback((enabled: boolean) => {
     setDraftSocial({
       reactionsEnabled: enabled,
-      allowedReactions: enabled ? [CLOSE_REACTION] : [],
+      allowedReactions: enabled ? [CLOSE_REACTION, PART_OF_THIS_REACTION] : [],
     });
   }, []);
 
   const handleCloseReactionChange = useCallback((enabled: boolean) => {
     setDraftSocial((current) => ({
       ...current,
-      allowedReactions: enabled ? [CLOSE_REACTION] : [],
+      allowedReactions: enabled
+        ? Array.from(new Set([...current.allowedReactions, CLOSE_REACTION]))
+        : current.allowedReactions.filter((reaction) => reaction !== CLOSE_REACTION),
+    }));
+  }, []);
+
+  const handlePartOfThisReactionChange = useCallback((enabled: boolean) => {
+    setDraftSocial((current) => ({
+      ...current,
+      allowedReactions: enabled
+        ? Array.from(new Set([...current.allowedReactions, PART_OF_THIS_REACTION]))
+        : current.allowedReactions.filter(
+            (reaction) => reaction !== PART_OF_THIS_REACTION
+          ),
     }));
   }, []);
 
@@ -360,7 +383,7 @@ export function PersonalPhotoModal({
     }, 1200);
   }, []);
 
-  const handleCloseReactionClick = useCallback(async () => {
+  const handleReactionClick = useCallback(async (reactionType: PhotoReactionType) => {
     if (!photo || closeReactionLoading) return;
     if (!isAuthenticated) {
       setCloseReactionMessage("Войдите, чтобы оставить реакцию");
@@ -370,17 +393,20 @@ export function PersonalPhotoModal({
     setCloseReactionLoading(true);
     setCloseReactionMessage("");
     try {
-      const currentReaction = closeReactionState?.viewerReaction ?? null;
-      const nextState =
-        currentReaction === CLOSE_REACTION
-          ? await deleteClosePhotoReactionViaServer(photo.id)
-          : await putClosePhotoReactionViaServer(photo.id);
+      const wasActive = hasViewerReaction(closeReactionState, reactionType);
+      const nextState = wasActive
+        ? await deletePhotoReactionViaServer(photo.id, reactionType)
+        : await putPhotoReactionViaServer(photo.id, reactionType);
       setCloseReactionState(nextState);
-      if (currentReaction !== CLOSE_REACTION && nextState.viewerReaction === CLOSE_REACTION) {
+      if (
+        reactionType === CLOSE_REACTION &&
+        !wasActive &&
+        hasViewerReaction(nextState, CLOSE_REACTION)
+      ) {
         playCloseReactionAnimation();
       }
     } catch (err) {
-      console.error("[reactions] close reaction toggle failed", err);
+      console.error("[reactions] reaction toggle failed", err);
       setCloseReactionMessage("Не удалось сохранить реакцию. Попробуйте ещё раз.");
     } finally {
       setCloseReactionLoading(false);
@@ -389,7 +415,7 @@ export function PersonalPhotoModal({
     photo,
     closeReactionLoading,
     isAuthenticated,
-    closeReactionState?.viewerReaction,
+    closeReactionState,
     playCloseReactionAnimation,
   ]);
 
@@ -591,9 +617,18 @@ export function PersonalPhotoModal({
   const canShowCloseReaction =
     photoSocial.reactionsEnabled &&
     photoSocial.allowedReactions.includes(CLOSE_REACTION);
+  const canShowPartOfThisReaction =
+    photoSocial.reactionsEnabled &&
+    photoSocial.allowedReactions.includes(PART_OF_THIS_REACTION);
+  const canShowReactions = canShowCloseReaction || canShowPartOfThisReaction;
   const closeReactionCount = closeReactionState?.counts.close ?? 0;
+  const partOfThisReactionCount = closeReactionState?.counts.partOfThis ?? 0;
   const closeReactionIsActive =
-    closeReactionState?.viewerReaction === CLOSE_REACTION;
+    hasViewerReaction(closeReactionState, CLOSE_REACTION);
+  const partOfThisReactionIsActive = hasViewerReaction(
+    closeReactionState,
+    PART_OF_THIS_REACTION
+  );
   const copiedTextSource =
     photo?.source?.kind === "imported-photo" &&
     photo.source.copiedText &&
@@ -606,7 +641,7 @@ export function PersonalPhotoModal({
   }, [isLinkTarget, photo?.id]);
 
   useEffect(() => {
-    if (!photo || !canShowCloseReaction) {
+    if (!photo || !canShowReactions) {
       setCloseReactionState(null);
       setCloseReactionMessage("");
       return;
@@ -631,7 +666,7 @@ export function PersonalPhotoModal({
     return () => {
       cancelled = true;
     };
-  }, [photo?.id, canShowCloseReaction]);
+  }, [photo?.id, canShowReactions]);
 
   if (!isOpen || !photo) return null;
 
@@ -870,7 +905,7 @@ export function PersonalPhotoModal({
                 </button>
               </div>
             )}
-            {canShowCloseReaction && !isEditMode && (
+            {canShowReactions && !isEditMode && (
               <div
                 className="personal-modal-reactions personal-modal-reactions-on-photo"
                 onClick={stopReactionEventPropagation}
@@ -882,27 +917,55 @@ export function PersonalPhotoModal({
                     <CloseToMeReactionIcon active={closeReactionAnimationActive} />
                   </div>
                 )}
-                <button
-                  type="button"
-                  className={`personal-modal-reaction-placeholder ${
-                    closeReactionIsActive
-                      ? "personal-modal-reaction-placeholder-active"
-                      : ""
-                  }`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleCloseReactionClick();
-                  }}
-                  disabled={closeReactionLoading}
-                  aria-pressed={closeReactionIsActive}
-                >
-                  Мне это близко
-                  {closeReactionCount > 0 ? (
-                    <span className="personal-modal-reaction-count">
-                      · {closeReactionCount}
+                {canShowCloseReaction && (
+                  <button
+                    type="button"
+                    className={`personal-modal-reaction-placeholder ${
+                      closeReactionIsActive
+                        ? "personal-modal-reaction-placeholder-active"
+                        : ""
+                    }`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleReactionClick(CLOSE_REACTION);
+                    }}
+                    disabled={closeReactionLoading}
+                    aria-pressed={closeReactionIsActive}
+                  >
+                    <span className="personal-modal-reaction-label">Мне это близко</span>
+                    {closeReactionCount > 0 ? (
+                      <span className="personal-modal-reaction-count">
+                        · {closeReactionCount}
+                      </span>
+                    ) : null}
+                  </button>
+                )}
+                {canShowPartOfThisReaction && (
+                  <button
+                    type="button"
+                    className={`personal-modal-reaction-placeholder ${
+                      partOfThisReactionIsActive
+                        ? "personal-modal-reaction-placeholder-active"
+                        : ""
+                    }`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleReactionClick(PART_OF_THIS_REACTION);
+                    }}
+                    disabled={closeReactionLoading}
+                    aria-pressed={partOfThisReactionIsActive}
+                  >
+                    <PartOfThisReactionIcon active={partOfThisReactionIsActive} />
+                    <span className="personal-modal-reaction-label">
+                      Я тоже был(а) частью этого
                     </span>
-                  ) : null}
-                </button>
+                    {partOfThisReactionCount > 0 ? (
+                      <span className="personal-modal-reaction-count">
+                        · {partOfThisReactionCount}
+                      </span>
+                    ) : null}
+                  </button>
+                )}
                 {closeReactionMessage ? (
                   <div className="personal-modal-reaction-message" role="status">
                     {closeReactionMessage}
@@ -1107,6 +1170,18 @@ export function PersonalPhotoModal({
                           }
                         />
                         <span>Мне это близко</span>
+                      </label>
+                      <label className="personal-modal-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={draftSocial.allowedReactions.includes(
+                            PART_OF_THIS_REACTION
+                          )}
+                          onChange={(e) =>
+                            handlePartOfThisReactionChange(e.target.checked)
+                          }
+                        />
+                        <span>Я тоже был(а) частью этого</span>
                       </label>
                     </div>
                   )}
