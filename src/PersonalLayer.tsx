@@ -14,6 +14,7 @@ export type PersonalPhoto = {
   note?: string;
   showOnTimeline?: boolean;
   seriesId?: string;
+  seriesIds?: string[];
   seriesReminder?: boolean;
   social?: PhotoSocialSettings;
   source?: PhotoImportSourceMetadata;

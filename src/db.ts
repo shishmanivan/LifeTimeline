@@ -7,7 +7,7 @@ import {
 } from "./photoSocial";
 
 const DB_NAME = "LifeTimelineDB";
-const DB_VERSION = 13;
+const DB_VERSION = 14;
 const STORE_NAME = "photos";
 const HISTORICAL_STORE = "historicalEvents";
 const SERIES_STORE = "photoSeries";
@@ -34,8 +34,10 @@ export type PhotoRecord = {
   note?: string;
   /** If false, photo is hidden from timeline (only visible when browsing day) */
   showOnTimeline?: boolean;
-  /** Series this photo belongs to */
+  /** Primary/legacy series this photo belongs to */
   seriesId?: string;
+  /** All series this photo belongs to */
+  seriesIds?: string[];
   /** Shows a hint that this text continues the previous photo in the series */
   seriesReminder?: boolean;
   /** Per-photo social interaction settings. Legacy records default to reactions off. */
@@ -50,9 +52,19 @@ function normalizePhotoRecord<T extends PhotoRecord | null>(record: T): T {
   if (!record) {
     return record;
   }
+  const seriesIds = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(record.seriesIds) ? record.seriesIds : []),
+        ...(record.seriesId ? [record.seriesId] : []),
+      ].filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+    )
+  );
 
   return {
     ...record,
+    seriesId: seriesIds[0],
+    seriesIds: seriesIds.length > 0 ? seriesIds : undefined,
     profileId: record.profileId ?? DEFAULT_PROFILE_ID,
     social: normalizePhotoSocialSettings(record.social),
   } as T;
@@ -63,7 +75,7 @@ function inferSeriesProfileId(
   photos: readonly PhotoRecord[]
 ): string | null {
   const linkedProfileIds = photos
-    .filter((photo) => photo.seriesId === seriesId)
+    .filter((photo) => (photo.seriesIds ?? (photo.seriesId ? [photo.seriesId] : [])).includes(seriesId))
     .map((photo) => photo.profileId ?? DEFAULT_PROFILE_ID);
   const uniqueProfileIds = [...new Set(linkedProfileIds)];
   return uniqueProfileIds.length === 1 ? uniqueProfileIds[0]! : null;
@@ -124,8 +136,25 @@ function openDB(): Promise<IDBDatabase> {
       if ((ev.newVersion ?? db.version) === 13 && tx) {
         migrateHistoricalRemoveDeprecatedFields(tx);
       }
+      if ((ev.newVersion ?? db.version) === 14 && tx) {
+        migratePersonalSeriesIds(tx);
+      }
     };
   });
+}
+
+function migratePersonalSeriesIds(tx: IDBTransaction): void {
+  const store = tx.objectStore(STORE_NAME);
+  const req = store.getAll();
+  req.onsuccess = () => {
+    const raw = (req.result || []) as PhotoRecord[];
+    for (const record of raw) {
+      const normalized = normalizePhotoRecord(record);
+      if (normalized.seriesIds?.length || record.seriesId) {
+        store.put(normalized);
+      }
+    }
+  };
 }
 
 const CARD_WIDTH_DAYS = 6;
@@ -271,9 +300,23 @@ export async function updatePhotoSeriesId(
   id: string,
   seriesId: string | undefined
 ): Promise<void> {
+  await updatePhotoSeriesIds(id, seriesId ? [seriesId] : []);
+}
+
+export async function updatePhotoSeriesIds(
+  id: string,
+  seriesIds: string[]
+): Promise<void> {
   const record = await getPhoto(id);
   if (!record) return;
-  await savePhoto({ ...record, seriesId });
+  const nextSeriesIds = Array.from(
+    new Set(seriesIds.filter((value) => value.trim().length > 0))
+  );
+  await savePhoto({
+    ...record,
+    seriesId: nextSeriesIds[0],
+    seriesIds: nextSeriesIds.length > 0 ? nextSeriesIds : undefined,
+  });
 }
 
 export async function saveSeries(series: SeriesRecord): Promise<void> {

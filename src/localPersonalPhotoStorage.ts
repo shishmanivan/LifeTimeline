@@ -11,6 +11,7 @@ import {
   updatePhotoOffsets,
   updatePhotoPreview,
   updatePhotoSeriesId,
+  updatePhotoSeriesIds,
 } from "./db";
 import type {
   PersonalPhotoStorage,
@@ -66,6 +67,7 @@ export function createLocalPersonalPhotoStorage(): PersonalPhotoStorage {
     updatePhotoOffsets,
     updatePhotoPreview,
     updatePhotoSeriesId,
+    updatePhotoSeriesIds,
   };
 }
 

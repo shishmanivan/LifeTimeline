@@ -43,6 +43,10 @@ export interface PersonalPhotoStorage {
     id: string,
     seriesId: string | undefined
   ): Promise<void>;
+  updatePhotoSeriesIds(
+    id: string,
+    seriesIds: string[]
+  ): Promise<void>;
   getAllSeries(): Promise<SeriesRecord[]>;
   saveSeries(series: SeriesRecord): Promise<void>;
   assignPersonalLaneIndex(records: PhotoRecord[]): PhotoRecord[];

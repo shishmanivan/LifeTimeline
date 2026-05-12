@@ -7,6 +7,7 @@ import { readPreparedPhotoCountsByProfile } from "./personalDataset";
 import type { PreparedPersonalDatasetScope } from "./personalDatasetResolver";
 import { resolvePreparedPersonalDataDir } from "./personalDatasetResolver";
 import { readIdentityStore } from "./identityStore";
+import { readProfileVisitStatsByProfileId } from "./profileVisitStore";
 import type { Profile } from "./profileRegistry";
 
 export type { Profile };
@@ -14,6 +15,8 @@ export type { Profile };
 export type AdminProfile = Profile & {
   accountCreatedAt: string | null;
   photoCount: number;
+  profileLastVisitedAt: string | null;
+  profileVisitCount: number;
 };
 
 export async function getProfileBySlug(slug: string): Promise<Profile | undefined> {
@@ -45,6 +48,7 @@ export async function listProfilesForAdmin(): Promise<readonly AdminProfile[]> {
   const store = await readIdentityStore();
   const usersById = new Map(store.users.map((user) => [user.id, user]));
   const photoCountsByProfileId = new Map<string, number>();
+  const profileVisitStatsByProfileId = await readProfileVisitStatsByProfileId();
 
   await Promise.all(
     store.profiles.map(async (profile) => {
@@ -67,6 +71,10 @@ export async function listProfilesForAdmin(): Promise<readonly AdminProfile[]> {
       ...profile,
       accountCreatedAt: owner?.createdAt ?? null,
       photoCount: photoCountsByProfileId.get(datasetProfileId) ?? 0,
+      profileLastVisitedAt:
+        profileVisitStatsByProfileId.get(profile.id)?.lastVisitedAt ?? null,
+      profileVisitCount:
+        profileVisitStatsByProfileId.get(profile.id)?.totalVisits ?? 0,
     };
   });
 }

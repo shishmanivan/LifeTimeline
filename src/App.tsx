@@ -80,6 +80,14 @@ const scales: Scale[] = ["30d", "60d", "90d", "1y", "2y", "5y", "10y"];
 const MOBILE_MAX_SCALE: Scale = "2y";
 const MOBILE_MAX_SCALE_INDEX = scales.indexOf(MOBILE_MAX_SCALE);
 
+function getMaxScaleIndex(isMobile: boolean): number {
+  return isMobile ? MOBILE_MAX_SCALE_INDEX : scales.length - 1;
+}
+
+function clampScaleIndex(index: number, isMobile: boolean): number {
+  return Math.min(Math.max(index, 0), getMaxScaleIndex(isMobile));
+}
+
 const scaleMeta: Record<Scale, { label: string; rangeDays: number }> = {
   "30d": { label: "30 дней", rangeDays: 30 },
   "60d": { label: "60 дней", rangeDays: 60 },
@@ -122,6 +130,27 @@ type AnchorPosition = "left" | "center" | "right";
 function getAnchorPosition(id: string): AnchorPosition {
   const idx = hashId(id) % 3;
   return idx === 0 ? "left" : idx === 1 ? "center" : "right";
+}
+
+function getPhotoSeriesIds(
+  photo: Pick<PersonalPhoto | PhotoRecordMetadata | PhotoRecord, "seriesId" | "seriesIds"> | null | undefined
+): string[] {
+  if (!photo) return [];
+  return Array.from(
+    new Set(
+      [
+        ...(Array.isArray(photo.seriesIds) ? photo.seriesIds : []),
+        ...(photo.seriesId ? [photo.seriesId] : []),
+      ].filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+    )
+  );
+}
+
+function photoBelongsToSeries(
+  photo: Pick<PersonalPhoto | PhotoRecordMetadata | PhotoRecord, "seriesId" | "seriesIds">,
+  seriesId: string
+): boolean {
+  return getPhotoSeriesIds(photo).includes(seriesId);
 }
 
 function getPersonalPhotoMaxOffsetY(laneIndex: number | undefined): number {
@@ -198,6 +227,7 @@ function toPersonalPhoto(
     note: record.note,
     showOnTimeline: record.showOnTimeline !== false,
     seriesId: record.seriesId,
+    seriesIds: getPhotoSeriesIds(record),
     seriesReminder: record.seriesReminder,
     social: normalizePhotoSocialSettings(record.social),
     source: record.source,
@@ -527,7 +557,7 @@ function App() {
     updatePhotoMetadata,
     updatePhotoOffsets,
     updatePhotoPreview,
-    updatePhotoSeriesId,
+    updatePhotoSeriesIds,
   } = personalPhotoStorage;
   const {
     canWrite,
@@ -549,6 +579,8 @@ function App() {
     personalPhotoStorageIsServerMode && !canWrite;
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const [scaleMenuOpen, setScaleMenuOpen] = useState(false);
+  const scaleMenuRef = useRef<HTMLDivElement | null>(null);
   const [googleScriptStatus, setGoogleScriptStatus] = useState<
     "idle" | "loading" | "loaded" | "error"
   >("idle");
@@ -600,9 +632,7 @@ function App() {
   const [scaleIndex, setScaleIndex] = useState(() => {
     const i = persisted.scaleIndex;
     const initial = typeof i === "number" && i >= 0 && i < scales.length ? i : 2;
-    return isMobileTimelineViewport()
-      ? Math.min(initial, MOBILE_MAX_SCALE_INDEX)
-      : initial;
+    return clampScaleIndex(initial, isMobileTimelineViewport());
   });
   const [isMobileTimeline, setIsMobileTimeline] = useState(
     isMobileTimelineViewport
@@ -649,6 +679,7 @@ function App() {
     );
   });
   const [overlayPhotoId, setOverlayPhotoId] = useState<string | null>(null);
+  const [activeOverlaySeriesId, setActiveOverlaySeriesId] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
   const [adminOverlayPhotoViewCount, setAdminOverlayPhotoViewCount] = useState<
     number | null
@@ -1036,6 +1067,29 @@ function App() {
   }, [accountMenuOpen]);
 
   useEffect(() => {
+    if (!scaleMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const menu = scaleMenuRef.current;
+      if (!menu || menu.contains(event.target as Node)) return;
+      setScaleMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setScaleMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [scaleMenuOpen]);
+
+  useEffect(() => {
     if (!canRenderGoogleButton) {
       googleButtonRenderedRef.current = false;
       return;
@@ -1247,7 +1301,8 @@ function App() {
 
   useEffect(() => {
     if (!isMobileTimeline) return;
-    setScaleIndex((current) => Math.min(current, MOBILE_MAX_SCALE_INDEX));
+    setScaleIndex((current) => clampScaleIndex(current, isMobileTimeline));
+    setScaleMenuOpen(false);
   }, [isMobileTimeline]);
 
   useEffect(() => {
@@ -1382,11 +1437,11 @@ function App() {
     const dayIds = personalPhotos
       .filter((p) => p.date === current.date)
       .map((p) => p.id);
-    const seriesIds = current.seriesId
-      ? personalPhotos
-          .filter((p) => p.seriesId === current.seriesId)
-          .map((p) => p.id)
-      : [];
+    const seriesIds = getPhotoSeriesIds(current).flatMap((seriesId) =>
+      personalPhotos
+        .filter((p) => photoBelongsToSeries(p, seriesId))
+        .map((p) => p.id)
+    );
     const toLoad = [...new Set([...dayIds, ...seriesIds])].filter(
       (id) => !imageBlobsRef.current.has(id)
     );
@@ -1532,13 +1587,14 @@ function App() {
       return;
     }
     const photo = personalPhotos.find((p) => p.id === hoveredPhotoId);
-    if (!photo?.seriesId) {
+    const photoSeriesIds = getPhotoSeriesIds(photo);
+    if (photoSeriesIds.length === 0) {
       setHoveredSeriesId(null);
       return;
     }
     hoverSeriesTimerRef.current = setTimeout(() => {
       hoverSeriesTimerRef.current = null;
-      setHoveredSeriesId(photo.seriesId ?? null);
+      setHoveredSeriesId(photoSeriesIds[0] ?? null);
     }, 1000);
     return () => {
       if (hoverSeriesTimerRef.current) {
@@ -1551,7 +1607,7 @@ function App() {
     (photoId: string): boolean => {
       if (!hoveredSeriesId) return false;
       const photo = personalPhotos.find((p) => p.id === photoId);
-      return !photo || photo.seriesId !== hoveredSeriesId;
+      return !photo || !photoBelongsToSeries(photo, hoveredSeriesId);
     },
     [hoveredSeriesId, personalPhotos]
   );
@@ -1691,7 +1747,7 @@ function App() {
 
   const seriesBadgePosition = useMemo((): { left: number; top: number; align: "above" | "left" | "right" } | null => {
     if (!hoveredSeriesId || !layoutInfo) return null;
-    const seriesPhotos = positionedPersonal.filter((p) => p.seriesId === hoveredSeriesId);
+    const seriesPhotos = positionedPersonal.filter((p) => photoBelongsToSeries(p, hoveredSeriesId));
     if (seriesPhotos.length === 0) return null;
     const baseY = layoutInfo.axisY - PERSONAL_BASE_Y_OFFSET;
     const SAFE_TOP = 48;
@@ -2083,7 +2139,7 @@ function App() {
       if (!visiblePhotoIds.has(photo.id)) continue;
       if (cardDragging === photo.id) continue;
       if (isDirty(photo.id)) continue;
-      if (hoveredSeriesId && (!photo.seriesId || photo.seriesId !== hoveredSeriesId)) continue;
+      if (hoveredSeriesId && !photoBelongsToSeries(photo, hoveredSeriesId)) continue;
       const card = personalCardRefs.current.get(photo.id);
       if (!card) continue;
 
@@ -2205,6 +2261,7 @@ function App() {
         note: photo.note,
         showOnTimeline: photo.showOnTimeline,
         seriesId: photo.seriesId,
+        seriesIds: getPhotoSeriesIds(photo),
         seriesReminder: photo.seriesReminder,
       })
     );
@@ -2297,26 +2354,58 @@ function App() {
       .sort((a, b) => a.id.localeCompare(b.id));
   }, [overlayPhotoId, personalPhotos]);
 
+  const currentOverlayPhoto = useMemo(
+    () => personalPhotos.find((p) => p.id === overlayPhotoId) ?? null,
+    [overlayPhotoId, personalPhotos]
+  );
+
+  const currentPhotoSeriesIds = useMemo(
+    () => getPhotoSeriesIds(currentOverlayPhoto),
+    [currentOverlayPhoto]
+  );
+
+  useEffect(() => {
+    if (!overlayPhotoId || currentPhotoSeriesIds.length === 0) {
+      if (activeOverlaySeriesId !== null) setActiveOverlaySeriesId(null);
+      return;
+    }
+    if (!activeOverlaySeriesId || !currentPhotoSeriesIds.includes(activeOverlaySeriesId)) {
+      setActiveOverlaySeriesId(currentPhotoSeriesIds[0] ?? null);
+    }
+  }, [overlayPhotoId, currentPhotoSeriesIds, activeOverlaySeriesId]);
+
+  const currentActiveSeriesId =
+    activeOverlaySeriesId && currentPhotoSeriesIds.includes(activeOverlaySeriesId)
+      ? activeOverlaySeriesId
+      : currentPhotoSeriesIds[0] ?? null;
+
+  const currentPhotoSeriesOptions = useMemo(
+    () =>
+      currentPhotoSeriesIds.map((id) => ({
+        id,
+        title: seriesMap[id] ?? "Серия",
+      })),
+    [currentPhotoSeriesIds, seriesMap]
+  );
+
   const photosInSeries = useMemo(() => {
-    if (!overlayPhotoId) return [];
-    const current = personalPhotos.find((p) => p.id === overlayPhotoId);
-    if (!current?.seriesId) return [];
+    if (!currentActiveSeriesId) return [];
     return personalPhotos
-      .filter((p) => p.seriesId === current.seriesId)
+      .filter((p) => photoBelongsToSeries(p, currentActiveSeriesId))
       .sort((a, b) => {
         const d = new Date(a.date).getTime() - new Date(b.date).getTime();
         return d !== 0 ? d : a.id.localeCompare(b.id);
       });
-  }, [overlayPhotoId, personalPhotos]);
+  }, [currentActiveSeriesId, personalPhotos]);
 
   const seriesTitle = useMemo(() => {
-    const current = personalPhotos.find((p) => p.id === overlayPhotoId);
-    if (!current?.seriesId) return null;
-    return seriesMap[current.seriesId] ?? null;
-  }, [overlayPhotoId, personalPhotos, seriesMap]);
+    if (!currentActiveSeriesId) return null;
+    return seriesMap[currentActiveSeriesId] ?? null;
+  }, [currentActiveSeriesId, seriesMap]);
 
   const handleOverlayClose = useCallback(() => {
     setOverlayPhotoId(null);
+    setActiveOverlaySeriesId(null);
     setOverlayEditMode(false);
     setLinkingMode(false);
     setLinkingSourcePhotoId(null);
@@ -2335,6 +2424,7 @@ function App() {
     setLinkingMode(false);
     setLinkingSourcePhotoId(null);
     setOverlayPhotoId(null);
+    setActiveOverlaySeriesId(null);
   }, []);
 
   useEffect(() => {
@@ -2355,19 +2445,10 @@ function App() {
       const targetPhoto = personalPhotos.find((p) => p.id === targetPhotoId);
       if (!sourcePhoto || !targetPhoto) return;
 
-      const sourceSeries = sourcePhoto.seriesId;
-      const targetSeries = targetPhoto.seriesId;
-
-      if (sourceSeries && targetSeries && sourceSeries !== targetSeries) {
-        alert(
-          "Оба фото уже в разных сериях. Объединение серий пока не поддерживается. Сначала отвяжите одно из фото от серии."
-        );
-        return;
-      }
-
       setLinkingMode(false);
       setLinkingSourcePhotoId(null);
       setOverlayPhotoId(null);
+      setActiveOverlaySeriesId(null);
 
       let seriesId: string;
       if (chosenSeriesId) {
@@ -2389,8 +2470,14 @@ function App() {
       }
 
       try {
-        await updatePhotoSeriesId(sourceId, seriesId);
-        await updatePhotoSeriesId(targetPhotoId, seriesId);
+        await updatePhotoSeriesIds(sourceId, [
+          ...getPhotoSeriesIds(sourcePhoto),
+          seriesId,
+        ]);
+        await updatePhotoSeriesIds(targetPhotoId, [
+          ...getPhotoSeriesIds(targetPhoto),
+          seriesId,
+        ]);
       } catch (err) {
         console.error("[link] DB update failed", err);
         alert("Ошибка сохранения связи. Попробуйте ещё раз.");
@@ -2404,6 +2491,7 @@ function App() {
       linkingSourcePhotoId,
       personalPhotos,
       refreshSeriesUiState,
+      updatePhotoSeriesIds,
     ]
   );
 
@@ -2413,7 +2501,13 @@ function App() {
       if (!window.confirm("Убрать фото из серии?")) return;
 
       try {
-        await updatePhotoSeriesId(photoId, undefined);
+        const photo = personalPhotos.find((item) => item.id === photoId);
+        const seriesIdToRemove = currentActiveSeriesId ?? getPhotoSeriesIds(photo)[0];
+        const nextSeriesIds = getPhotoSeriesIds(photo).filter(
+          (seriesId) => seriesId !== seriesIdToRemove
+        );
+        await updatePhotoSeriesIds(photoId, nextSeriesIds);
+        setActiveOverlaySeriesId(nextSeriesIds[0] ?? null);
         setOverlayEditMode(false);
         await refreshSeriesUiState();
       } catch (err) {
@@ -2421,7 +2515,13 @@ function App() {
         alert("Ошибка сохранения. Попробуйте ещё раз.");
       }
     },
-    [canUnlinkSeriesForCurrentView, refreshSeriesUiState]
+    [
+      canUnlinkSeriesForCurrentView,
+      currentActiveSeriesId,
+      personalPhotos,
+      refreshSeriesUiState,
+      updatePhotoSeriesIds,
+    ]
   );
 
   const handleRenameSeries = useCallback(
@@ -2560,6 +2660,7 @@ function App() {
           note: photo.note,
           showOnTimeline: photo.showOnTimeline,
           seriesId: photo.seriesId,
+          seriesIds: getPhotoSeriesIds(photo),
           seriesReminder: photo.seriesReminder,
           social: normalizePhotoSocialSettings(photo.social),
         })
@@ -2715,18 +2816,19 @@ function App() {
   }, [canDeleteAllPhotosInDayForCurrentView, overlayPhotoId, personalPhotos]);
 
   const changeScale = useCallback((direction: 1 | -1) => {
-    const maxScaleIndex = isMobileTimeline
-      ? MOBILE_MAX_SCALE_INDEX
-      : scales.length - 1;
     setScaleIndex((current) => {
-      const next = current + direction;
-      if (next < 0 || next > maxScaleIndex) return current;
+      const next = clampScaleIndex(current + direction, isMobileTimeline);
       return next;
     });
   }, [isMobileTimeline]);
 
+  const selectScale = useCallback((nextIndex: number) => {
+    setScaleIndex(clampScaleIndex(nextIndex, isMobileTimeline));
+    setScaleMenuOpen(false);
+  }, [isMobileTimeline]);
+
   const onWheel: React.WheelEventHandler<HTMLDivElement> = (e) => {
-    if (overlayPhotoId || modalOpen || linkingMode) {
+    if (overlayPhotoId || modalOpen || linkingMode || adminFunctionsModalOpen) {
       const target = e.target as HTMLElement;
       if (target.closest(".personal-modal-overlay, .modal-overlay")) {
         return;
@@ -3259,13 +3361,53 @@ function App() {
               Личный слой: только просмотр.
             </div>
           ) : null}
-          <div className="scale">Масштаб: {scaleMeta[scale].label}</div>
+          {!isMobileTimeline && (
+            <div className="scale-menu" ref={scaleMenuRef}>
+              <button
+                type="button"
+                className="top-bar-btn scale-button"
+                onClick={() => {
+                  setAccountMenuOpen(false);
+                  setScaleMenuOpen((open) => !open);
+                }}
+                aria-haspopup="menu"
+                aria-expanded={scaleMenuOpen}
+              >
+                Масштаб: {scaleMeta[scale].label}
+              </button>
+              {scaleMenuOpen && (
+                <div className="scale-menu-panel" role="menu">
+                  {scales.map((candidateScale, candidateIndex) => {
+                    if (candidateIndex > getMaxScaleIndex(isMobileTimeline)) {
+                      return null;
+                    }
+                    const isCurrent = candidateIndex === scaleIndex;
+                    return (
+                      <button
+                        key={candidateScale}
+                        type="button"
+                        className={`scale-menu-option${isCurrent ? " is-active" : ""}`}
+                        onClick={() => selectScale(candidateIndex)}
+                        role="menuitemradio"
+                        aria-checked={isCurrent}
+                      >
+                        {scaleMeta[candidateScale].label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           {authenticatedUser && (
             <div className="account-menu" ref={accountMenuRef}>
               <button
                 type="button"
                 className="account-avatar-button"
-                onClick={() => setAccountMenuOpen((open) => !open)}
+                onClick={() => {
+                  setScaleMenuOpen(false);
+                  setAccountMenuOpen((open) => !open);
+                }}
                 aria-label="Открыть меню профиля"
                 aria-haspopup="menu"
                 aria-expanded={accountMenuOpen}
@@ -3382,6 +3524,7 @@ function App() {
                     date: p.date,
                     note: p.note,
                     seriesId: p.seriesId,
+                    seriesIds: getPhotoSeriesIds(p),
                     seriesReminder: p.seriesReminder,
                     social: p.social,
                     source: p.source,
@@ -3394,6 +3537,8 @@ function App() {
             title: p.title,
             date: p.date,
             note: p.note,
+            seriesId: p.seriesId,
+            seriesIds: getPhotoSeriesIds(p),
             seriesReminder: p.seriesReminder,
             social: p.social,
             source: p.source,
@@ -3423,6 +3568,9 @@ function App() {
             title: p.title,
           }))}
           seriesTitle={seriesTitle}
+          photoSeries={currentPhotoSeriesOptions}
+          activeSeriesId={currentActiveSeriesId}
+          onActiveSeriesChange={setActiveOverlaySeriesId}
           onStartLinking={handleStartLinking}
           onConfirmLink={handleConfirmLink}
           onUnlinkFromSeries={handleUnlinkFromSeries}

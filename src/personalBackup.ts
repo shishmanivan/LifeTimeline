@@ -30,6 +30,7 @@ export type BackupPhotoEntry = {
   laneIndex?: number;
   showOnTimeline?: boolean;
   seriesId?: string;
+  seriesIds?: string[];
   seriesReminder?: boolean;
   imageFile: string;
   previewFile?: string;
@@ -76,6 +77,17 @@ function extForMime(mime: string): string {
   if (m.includes("webp")) return "webp";
   if (m.includes("gif")) return "gif";
   return "bin";
+}
+
+function getBackupSeriesIds(photo: Pick<PhotoRecord | BackupPhotoEntry, "seriesId" | "seriesIds">): string[] {
+  return Array.from(
+    new Set(
+      [
+        ...(Array.isArray(photo.seriesIds) ? photo.seriesIds : []),
+        ...(photo.seriesId ? [photo.seriesId] : []),
+      ].filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+    )
+  );
 }
 
 async function writeUtf8Json(
@@ -220,6 +232,7 @@ export async function exportBackupToPickedFolder(): Promise<
         laneIndex: p.laneIndex,
         showOnTimeline: p.showOnTimeline,
         seriesId: p.seriesId,
+        seriesIds: getBackupSeriesIds(p),
         seriesReminder: p.seriesReminder,
         imageFile: `images/${imageName}`,
         previewFile,
@@ -300,6 +313,7 @@ export async function importBackupFromPickedFolder(): Promise<
         laneIndex: e.laneIndex,
         showOnTimeline: e.showOnTimeline,
         seriesId: e.seriesId,
+        seriesIds: getBackupSeriesIds(e),
         seriesReminder: e.seriesReminder,
         note: e.note,
       });
@@ -351,6 +365,7 @@ export async function exportBackupAsJsonDownload(): Promise<
         laneIndex: p.laneIndex,
         showOnTimeline: p.showOnTimeline,
         seriesId: p.seriesId,
+        seriesIds: getBackupSeriesIds(p),
         seriesReminder: p.seriesReminder,
         imageMime: p.imageBlob.type || "image/jpeg",
         imageBase64,
@@ -415,6 +430,7 @@ export async function importBackupFromJsonFile(
         laneIndex: e.laneIndex,
         showOnTimeline: e.showOnTimeline,
         seriesId: e.seriesId,
+        seriesIds: getBackupSeriesIds(e),
         seriesReminder: e.seriesReminder,
         note: e.note,
       });

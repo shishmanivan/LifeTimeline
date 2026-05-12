@@ -67,6 +67,7 @@ type ServerPhotoFields = {
   laneIndex?: number;
   showOnTimeline?: boolean;
   seriesId?: string;
+  seriesIds?: string[];
   seriesReminder?: boolean;
   social?: PhotoSocialSettings;
   source?: PhotoImportSourceMetadata;
@@ -88,9 +89,20 @@ export type ServerSeriesDto = SeriesRecord;
 export type ServerProfileDto = ProfileModel & {
   accountCreatedAt?: string | null;
   photoCount?: number;
+  profileLastVisitedAt?: string | null;
+  profileVisitCount?: number;
 };
 export type ListAdminProfilesResponse = {
   profiles: ServerProfileDto[];
+};
+
+export type RecordProfileVisitResponse = {
+  ok: boolean;
+  profileId: string;
+  stats: {
+    lastVisitedAt: string | null;
+    totalVisits: number;
+  };
 };
 
 export type GetCurrentAuthenticatedUserResponse = CurrentAuthenticatedUserResult;
@@ -177,6 +189,7 @@ export type PatchServerPersonalPhotoMetadataRequest = {
 
 export type UpdateServerPhotoSeriesRequest = {
   seriesId: string | null;
+  seriesIds?: string[];
 };
 
 const DEFAULT_API_BASE_PATH = "/api/personal";
@@ -238,7 +251,29 @@ export async function loadProfileForCurrentRoute(
     return null;
   }
 
-  return (await response.json()) as ServerProfileDto;
+  const profile = (await response.json()) as ServerProfileDto;
+  void recordProfileVisitForSlug(profileSlug, options).catch((err) => {
+    console.warn("[profile] visit tracking failed", err);
+  });
+  return profile;
+}
+
+async function recordProfileVisitForSlug(
+  profileSlug: string,
+  options: Pick<ServerPersonalPhotoStorageOptions, "baseUrl" | "fetchImpl"> = {}
+): Promise<void> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  await fetchJson<RecordProfileVisitResponse>(
+    fetchImpl,
+    joinApiUrl(
+      options.baseUrl,
+      "",
+      `/api/profile/${encodeURIComponent(profileSlug)}/visit`
+    ),
+    {
+      method: "POST",
+    }
+  );
 }
 
 export async function loadAdminProfiles(
@@ -705,6 +740,7 @@ function toServerPhotoFields(photo: PhotoRecord): ServerPhotoFields {
     laneIndex: photo.laneIndex,
     showOnTimeline: photo.showOnTimeline,
     seriesId: photo.seriesId,
+    seriesIds: photo.seriesIds,
     seriesReminder: photo.seriesReminder,
     social: normalizePhotoSocialSettings(photo.social),
     source: photo.source,
@@ -774,6 +810,7 @@ async function serverPhotoDtoToPhotoRecord(
     note: dto.note,
     showOnTimeline: dto.showOnTimeline,
     seriesId: dto.seriesId,
+    seriesIds: dto.seriesIds,
     seriesReminder: dto.seriesReminder,
     social: normalizePhotoSocialSettings(dto.social),
     source: dto.source,
@@ -793,6 +830,7 @@ function serverPhotoDtoToPhotoMetadata(dto: ServerPersonalPhotoDto): PhotoRecord
     note: dto.note,
     showOnTimeline: dto.showOnTimeline,
     seriesId: dto.seriesId,
+    seriesIds: dto.seriesIds,
     seriesReminder: dto.seriesReminder,
     social: normalizePhotoSocialSettings(dto.social),
     hasPreview: !!dto.previewUrl,
@@ -1015,6 +1053,30 @@ export function createServerPersonalPhotoStorage(
       ensureWriteAllowed();
       const body: UpdateServerPhotoSeriesRequest = {
         seriesId: seriesId ?? null,
+        seriesIds: seriesId ? [seriesId] : [],
+      };
+      await requestOk(
+        fetchImpl,
+        apiUrl(`/photos/${encodeURIComponent(id)}/series`),
+        {
+          method: "PATCH",
+          ...jsonRequest(body),
+        }
+      );
+      clearPhotoListCache();
+    },
+
+    async updatePhotoSeriesIds(
+      id: string,
+      seriesIds: string[]
+    ): Promise<void> {
+      ensureWriteAllowed();
+      const nextSeriesIds = Array.from(
+        new Set(seriesIds.filter((value) => value.trim().length > 0))
+      );
+      const body: UpdateServerPhotoSeriesRequest = {
+        seriesId: nextSeriesIds[0] ?? null,
+        seriesIds: nextSeriesIds,
       };
       await requestOk(
         fetchImpl,

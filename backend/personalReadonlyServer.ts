@@ -57,6 +57,7 @@ import {
   recordPhotoView,
   type PhotoViewIdentity,
 } from "./photoViewStore";
+import { recordProfileVisit } from "./profileVisitStore";
 import {
   deletePhotoReaction,
   putPhotoReaction,
@@ -483,32 +484,56 @@ function parseSeriesRecord(
   };
 }
 
+function parseSeriesIds(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Field "${fieldName}" must be an array.`);
+  }
+
+  return Array.from(
+    new Set(
+      value.map((item) => {
+        if (typeof item !== "string" || !item.trim()) {
+          throw new Error(`Field "${fieldName}" must contain non-empty strings.`);
+        }
+        return item;
+      })
+    )
+  );
+}
+
 function parsePhotoSeriesPatch(body: unknown): PreparedSeriesPatch {
   if (!isRecord(body)) {
     throw new Error("Series patch must be a JSON object.");
   }
 
-  const allowedKeys = new Set(["seriesId"]);
+  const allowedKeys = new Set(["seriesId", "seriesIds"]);
   for (const key of Object.keys(body)) {
     if (!allowedKeys.has(key)) {
       throw new Error(`Unsupported series field "${key}".`);
     }
   }
 
-  if (!("seriesId" in body)) {
-    throw new Error('Field "seriesId" is required.');
+  if (!("seriesId" in body) && !("seriesIds" in body)) {
+    throw new Error('Field "seriesId" or "seriesIds" is required.');
   }
 
-  if (body.seriesId !== null && typeof body.seriesId !== "string") {
+  if ("seriesId" in body && body.seriesId !== null && typeof body.seriesId !== "string") {
     throw new Error('Field "seriesId" must be a string or null.');
   }
 
-  if (typeof body.seriesId === "string" && !body.seriesId.trim()) {
+  if ("seriesId" in body && typeof body.seriesId === "string" && !body.seriesId.trim()) {
     throw new Error('Field "seriesId" cannot be empty.');
   }
 
+  const seriesIds = "seriesIds" in body ? parseSeriesIds(body.seriesIds, "seriesIds") : undefined;
+  const seriesId =
+    "seriesId" in body && typeof body.seriesId === "string"
+      ? body.seriesId
+      : null;
+
   return {
-    seriesId: body.seriesId,
+    seriesId: "seriesId" in body ? seriesId : seriesIds?.[0] ?? null,
+    seriesIds,
   };
 }
 
@@ -757,6 +782,7 @@ function parsePhotoUpsertMetadata(
     "laneIndex",
     "showOnTimeline",
     "seriesId",
+    "seriesIds",
     "seriesReminder",
     "social",
   ]);
@@ -849,6 +875,11 @@ function parsePhotoUpsertMetadata(
       throw new Error('Field "seriesId" must be a non-empty string.');
     }
     metadata.seriesId = body.seriesId;
+  }
+
+  if ("seriesIds" in body) {
+    metadata.seriesIds = parseSeriesIds(body.seriesIds, "seriesIds");
+    metadata.seriesId = metadata.seriesIds[0] ?? metadata.seriesId;
   }
 
   if ("seriesReminder" in body) {
@@ -1657,6 +1688,25 @@ if (req.method === "GET" && profileMatch) {
   }
 
   sendJson(res, 200, profile);
+  return;
+}
+
+const profileVisitMatch = pathname.match(/^\/api\/profile\/([^/]+)\/visit$/);
+if (req.method === "POST" && profileVisitMatch) {
+  const slug = decodeURIComponent(profileVisitMatch[1]);
+  const profile = await getProfileBySlug(slug);
+
+  if (!profile) {
+    sendJson(res, 404, { error: "Profile not found" });
+    return;
+  }
+
+  const stats = await recordProfileVisit(profile.id);
+  sendJson(res, 200, {
+    ok: true,
+    profileId: profile.id,
+    stats,
+  });
   return;
 }
 

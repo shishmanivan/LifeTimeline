@@ -34,6 +34,7 @@ type PreparedPhotoEntry = {
   laneIndex?: number;
   showOnTimeline?: boolean;
   seriesId?: string;
+  seriesIds?: string[];
   seriesReminder?: boolean;
   social?: PhotoSocialSettings;
   source?: PhotoImportSourceMetadata;
@@ -85,6 +86,7 @@ export type PreparedPhotoMetadataPatch = {
 
 export type PreparedSeriesPatch = {
   seriesId: string | null;
+  seriesIds?: string[];
 };
 
 export type SavePreparedPhotoInput = {
@@ -194,6 +196,7 @@ function toPhotoDto(
     laneIndex: photo.laneIndex,
     showOnTimeline: photo.showOnTimeline,
     seriesId: photo.seriesId,
+    seriesIds: photo.seriesIds,
     seriesReminder: photo.seriesReminder,
     social: normalizePhotoSocialSettings(photo.social),
     source: photo.source,
@@ -207,8 +210,19 @@ function toPhotoDto(
 function normalizePreparedPhotoEntry(
   photo: PreparedPhotoEntry | (Omit<PreparedPhotoEntry, "profileId"> & { profileId?: string })
 ): PreparedPhotoEntry {
+  const seriesIds = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(photo.seriesIds) ? photo.seriesIds : []),
+        ...(photo.seriesId ? [photo.seriesId] : []),
+      ].filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+    )
+  );
+
   return {
     ...photo,
+    seriesId: seriesIds[0],
+    seriesIds: seriesIds.length > 0 ? seriesIds : undefined,
     profileId: photo.profileId ?? DEFAULT_PROFILE_ID,
     social: normalizePhotoSocialSettings(photo.social),
   };
@@ -259,7 +273,7 @@ function inferPreparedSeriesProfileId(
   photos: readonly PreparedPhotoEntry[]
 ): string | null {
   const linkedProfileIds = photos
-    .filter((photo) => photo.seriesId === seriesId)
+    .filter((photo) => (photo.seriesIds ?? (photo.seriesId ? [photo.seriesId] : [])).includes(seriesId))
     .map((photo) => photo.profileId ?? DEFAULT_PROFILE_ID);
   const uniqueProfileIds = [...new Set(linkedProfileIds)];
   return uniqueProfileIds.length === 1 ? uniqueProfileIds[0]! : null;
@@ -774,16 +788,22 @@ export async function updatePreparedPhotoSeries(
     return "photo-not-found";
   }
 
-  if (
-    patch.seriesId !== null &&
-    !manifest.series.some((series) => series.id === patch.seriesId)
-  ) {
+  const nextSeriesIds = patch.seriesIds
+    ? Array.from(
+        new Set(patch.seriesIds.filter((value) => value.trim().length > 0))
+      )
+    : patch.seriesId
+      ? [patch.seriesId]
+      : [];
+
+  if (nextSeriesIds.some((seriesId) => !manifest.series.some((series) => series.id === seriesId))) {
     return "series-not-found";
   }
 
   manifest.photos[photoIndex] = {
     ...manifest.photos[photoIndex],
-    seriesId: patch.seriesId ?? undefined,
+    seriesId: nextSeriesIds[0],
+    seriesIds: nextSeriesIds.length > 0 ? nextSeriesIds : undefined,
   };
 
   await writePreparedManifest(dataDir, manifest);

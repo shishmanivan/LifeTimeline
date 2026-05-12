@@ -22,6 +22,7 @@ export type PersonalPhotoForModal = {
   date: string;
   note?: string;
   seriesId?: string;
+  seriesIds?: string[];
   seriesReminder?: boolean;
   social?: PhotoSocialSettings;
   source?: PhotoImportSourceMetadata;
@@ -39,6 +40,9 @@ type PersonalPhotoModalProps = {
   photosInDay: PersonalPhotoForModal[];
   photosInSeries: PhotoInSeriesForModal[];
   seriesTitle: string | null;
+  photoSeries: { id: string; title: string }[];
+  activeSeriesId: string | null;
+  onActiveSeriesChange: (seriesId: string) => void;
   imageUrl: string | null;
   isOpen: boolean;
   isEditMode: boolean;
@@ -113,6 +117,9 @@ export function PersonalPhotoModal({
   photosInDay,
   photosInSeries,
   seriesTitle,
+  photoSeries,
+  activeSeriesId,
+  onActiveSeriesChange,
   imageUrl,
   isOpen,
   isEditMode,
@@ -159,6 +166,8 @@ export function PersonalPhotoModal({
     useState(false);
   const [closeReactionAnimationActive, setCloseReactionAnimationActive] =
     useState(false);
+  const [reactionAnimationType, setReactionAnimationType] =
+    useState<PhotoReactionType>(CLOSE_REACTION);
   const [closeReactionState, setCloseReactionState] =
     useState<GetPhotoReactionsResponse | null>(null);
   const [closeReactionLoading, setCloseReactionLoading] = useState(false);
@@ -182,7 +191,12 @@ export function PersonalPhotoModal({
   const currentSeriesIndex = photo
     ? photosInSeries.findIndex((p) => p.id === photo.id)
     : -1;
-  const canSetSeriesReminder = !!photo?.seriesId && currentSeriesIndex > 0;
+  const activePhotoSeriesIndex = activeSeriesId
+    ? photoSeries.findIndex((series) => series.id === activeSeriesId)
+    : -1;
+  const hasMultiplePhotoSeries = photoSeries.length > 1;
+  const hasActiveSeries = !!activeSeriesId;
+  const canSetSeriesReminder = hasActiveSeries && currentSeriesIndex > 0;
   const canImportAllPhotosOfDay = photosInDay.length > 1;
   const savedSeriesReminder =
     canSetSeriesReminder && photo?.seriesReminder === true;
@@ -212,6 +226,7 @@ export function PersonalPhotoModal({
       setDraftSocial(normalizePhotoSocialSettings(photo.social));
       setCloseReactionAnimationVisible(false);
       setCloseReactionAnimationActive(false);
+      setReactionAnimationType(CLOSE_REACTION);
       setCloseReactionState(null);
       setCloseReactionMessage("");
       setImportMenuOpen(false);
@@ -250,7 +265,7 @@ export function PersonalPhotoModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    if (!photo?.seriesId) {
+    if (!activeSeriesId) {
       setDraftSeriesTitle("");
       setRenamingSeries(false);
       return;
@@ -258,7 +273,7 @@ export function PersonalPhotoModal({
     if (!renamingSeries) {
       setDraftSeriesTitle(seriesTitle ?? "");
     }
-  }, [isOpen, photo?.seriesId, seriesTitle, renamingSeries]);
+  }, [isOpen, activeSeriesId, seriesTitle, renamingSeries]);
 
   useEffect(() => {
     if (renamingSeries) {
@@ -296,20 +311,38 @@ export function PersonalPhotoModal({
   }, [photo, onUnlinkFromSeries]);
 
   const handleRenameSeriesSave = useCallback(async () => {
-    if (!photo?.seriesId) return;
+    if (!activeSeriesId) return;
     const title = draftSeriesTitle.trim();
     if (!title) {
       alert("Название серии не может быть пустым.");
       return;
     }
     try {
-      await onRenameSeries(photo.seriesId, title);
+      await onRenameSeries(activeSeriesId, title);
       setRenamingSeries(false);
     } catch (err) {
       console.error("[series] rename failed", err);
       alert("Ошибка переименования серии. Попробуйте ещё раз.");
     }
-  }, [photo?.seriesId, draftSeriesTitle, onRenameSeries]);
+  }, [activeSeriesId, draftSeriesTitle, onRenameSeries]);
+
+  const handleCycleSeries = useCallback(
+    (direction: -1 | 1) => {
+      if (!hasMultiplePhotoSeries) return;
+      const currentIndex = activePhotoSeriesIndex >= 0 ? activePhotoSeriesIndex : 0;
+      const nextIndex =
+        (currentIndex + direction + photoSeries.length) % photoSeries.length;
+      onActiveSeriesChange(photoSeries[nextIndex].id);
+      setRenamingSeries(false);
+      setSeriesGalleryOpen(false);
+    },
+    [
+      activePhotoSeriesIndex,
+      hasMultiplePhotoSeries,
+      onActiveSeriesChange,
+      photoSeries,
+    ]
+  );
 
   const handleSave = useCallback(() => {
     if (photo) {
@@ -359,7 +392,7 @@ export function PersonalPhotoModal({
     }));
   }, []);
 
-  const playCloseReactionAnimation = useCallback(() => {
+  const playReactionAnimation = useCallback((reactionType: PhotoReactionType) => {
     if (closeReactionAnimationTimerRef.current !== null) {
       window.clearTimeout(closeReactionAnimationTimerRef.current);
     }
@@ -367,6 +400,7 @@ export function PersonalPhotoModal({
       window.cancelAnimationFrame(closeReactionAnimationFrameRef.current);
     }
 
+    setReactionAnimationType(reactionType);
     setCloseReactionAnimationActive(false);
     setCloseReactionAnimationVisible(true);
 
@@ -399,11 +433,10 @@ export function PersonalPhotoModal({
         : await putPhotoReactionViaServer(photo.id, reactionType);
       setCloseReactionState(nextState);
       if (
-        reactionType === CLOSE_REACTION &&
         !wasActive &&
-        hasViewerReaction(nextState, CLOSE_REACTION)
+        hasViewerReaction(nextState, reactionType)
       ) {
-        playCloseReactionAnimation();
+        playReactionAnimation(reactionType);
       }
     } catch (err) {
       console.error("[reactions] reaction toggle failed", err);
@@ -416,7 +449,7 @@ export function PersonalPhotoModal({
     closeReactionLoading,
     isAuthenticated,
     closeReactionState,
-    playCloseReactionAnimation,
+    playReactionAnimation,
   ]);
 
   const handleImportButtonClick = useCallback(() => {
@@ -912,59 +945,75 @@ export function PersonalPhotoModal({
                 onPointerDown={stopReactionEventPropagation}
                 onTouchStart={stopReactionEventPropagation}
               >
-                {closeReactionAnimationVisible && (
-                  <div className="personal-modal-reaction-burst" aria-hidden="true">
-                    <CloseToMeReactionIcon active={closeReactionAnimationActive} />
+                {canShowCloseReaction && (
+                  <div className="personal-modal-reaction-button-wrap">
+                    {closeReactionAnimationVisible && (
+                      <div className="personal-modal-reaction-burst" aria-hidden="true">
+                        {reactionAnimationType === PART_OF_THIS_REACTION ? (
+                          <PartOfThisReactionIcon active={closeReactionAnimationActive} />
+                        ) : (
+                          <CloseToMeReactionIcon active={closeReactionAnimationActive} />
+                        )}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className={`personal-modal-reaction-placeholder ${
+                        closeReactionIsActive
+                          ? "personal-modal-reaction-placeholder-active"
+                          : ""
+                      }`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleReactionClick(CLOSE_REACTION);
+                      }}
+                      disabled={closeReactionLoading}
+                      aria-pressed={closeReactionIsActive}
+                    >
+                      <span className="personal-modal-reaction-label">Мне это близко</span>
+                      {closeReactionCount > 0 ? (
+                        <span className="personal-modal-reaction-count">
+                          · {closeReactionCount}
+                        </span>
+                      ) : null}
+                    </button>
                   </div>
                 )}
-                {canShowCloseReaction && (
-                  <button
-                    type="button"
-                    className={`personal-modal-reaction-placeholder ${
-                      closeReactionIsActive
-                        ? "personal-modal-reaction-placeholder-active"
-                        : ""
-                    }`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void handleReactionClick(CLOSE_REACTION);
-                    }}
-                    disabled={closeReactionLoading}
-                    aria-pressed={closeReactionIsActive}
-                  >
-                    <span className="personal-modal-reaction-label">Мне это близко</span>
-                    {closeReactionCount > 0 ? (
-                      <span className="personal-modal-reaction-count">
-                        · {closeReactionCount}
-                      </span>
-                    ) : null}
-                  </button>
-                )}
                 {canShowPartOfThisReaction && (
-                  <button
-                    type="button"
-                    className={`personal-modal-reaction-placeholder ${
-                      partOfThisReactionIsActive
-                        ? "personal-modal-reaction-placeholder-active"
-                        : ""
-                    }`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void handleReactionClick(PART_OF_THIS_REACTION);
-                    }}
-                    disabled={closeReactionLoading}
-                    aria-pressed={partOfThisReactionIsActive}
-                  >
-                    <PartOfThisReactionIcon active={partOfThisReactionIsActive} />
-                    <span className="personal-modal-reaction-label">
-                      Я тоже был(а) частью этого
-                    </span>
-                    {partOfThisReactionCount > 0 ? (
-                      <span className="personal-modal-reaction-count">
-                        · {partOfThisReactionCount}
+                  <div className="personal-modal-reaction-button-wrap">
+                    {!canShowCloseReaction && closeReactionAnimationVisible && (
+                      <div className="personal-modal-reaction-burst" aria-hidden="true">
+                        {reactionAnimationType === PART_OF_THIS_REACTION ? (
+                          <PartOfThisReactionIcon active={closeReactionAnimationActive} />
+                        ) : (
+                          <CloseToMeReactionIcon active={closeReactionAnimationActive} />
+                        )}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className={`personal-modal-reaction-placeholder ${
+                        partOfThisReactionIsActive
+                          ? "personal-modal-reaction-placeholder-active"
+                          : ""
+                      }`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleReactionClick(PART_OF_THIS_REACTION);
+                      }}
+                      disabled={closeReactionLoading}
+                      aria-pressed={partOfThisReactionIsActive}
+                    >
+                      <span className="personal-modal-reaction-label">
+                        Я тоже был(а) частью этого
                       </span>
-                    ) : null}
-                  </button>
+                      {partOfThisReactionCount > 0 ? (
+                        <span className="personal-modal-reaction-count">
+                          · {partOfThisReactionCount}
+                        </span>
+                      ) : null}
+                    </button>
+                  </div>
                 )}
                 {closeReactionMessage ? (
                   <div className="personal-modal-reaction-message" role="status">
@@ -1077,16 +1126,38 @@ export function PersonalPhotoModal({
                     className="personal-modal-input"
                   />
                 </div>
-                {photo.seriesId && (
+                {hasActiveSeries && (
                   <div className="personal-modal-field personal-modal-field-series">
                     <label>Серия</label>
                     {!renamingSeries ? (
                       <div className="personal-modal-series-rename-row">
-                        <div
-                          className="personal-modal-series-name"
-                          title={seriesTitle ?? ""}
-                        >
-                          {seriesTitle ?? "Серия"}
+                        <div className="personal-modal-series-name-switch">
+                          {hasMultiplePhotoSeries && (
+                            <button
+                              type="button"
+                              className="personal-modal-series-switch-btn"
+                              onClick={() => handleCycleSeries(-1)}
+                              aria-label="Предыдущая серия"
+                            >
+                              {"<"}
+                            </button>
+                          )}
+                          <div
+                            className="personal-modal-series-name"
+                            title={seriesTitle ?? ""}
+                          >
+                            {seriesTitle ?? "Серия"}
+                          </div>
+                          {hasMultiplePhotoSeries && (
+                            <button
+                              type="button"
+                              className="personal-modal-series-switch-btn"
+                              onClick={() => handleCycleSeries(1)}
+                              aria-label="Следующая серия"
+                            >
+                              {">"}
+                            </button>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -1233,7 +1304,7 @@ export function PersonalPhotoModal({
                       >
                         Связать фото
                       </button>
-                      {photo.seriesId && (
+                      {hasActiveSeries && (
                         <button
                           type="button"
                           className="personal-modal-btn personal-modal-btn-secondary"
@@ -1356,7 +1427,31 @@ export function PersonalPhotoModal({
         {photosInSeries.length > 1 && (
           <div className="personal-modal-series">
             <div className="personal-modal-series-title">
-              {seriesTitle ? `Серия: ${seriesTitle}` : "Связанные фото"}
+              <span className="personal-modal-series-title-switch">
+                {hasMultiplePhotoSeries && (
+                  <button
+                    type="button"
+                    className="personal-modal-series-title-btn"
+                    onClick={() => handleCycleSeries(-1)}
+                    aria-label="Предыдущая серия"
+                  >
+                    {"<"}
+                  </button>
+                )}
+                <span className="personal-modal-series-title-text">
+                  {seriesTitle ? `Серия: ${seriesTitle}` : "Связанные фото"}
+                </span>
+                {hasMultiplePhotoSeries && (
+                  <button
+                    type="button"
+                    className="personal-modal-series-title-btn"
+                    onClick={() => handleCycleSeries(1)}
+                    aria-label="Следующая серия"
+                  >
+                    {">"}
+                  </button>
+                )}
+              </span>
             </div>
             <div className="personal-modal-series-scroll">
               {photosInSeries.map((p) => (
